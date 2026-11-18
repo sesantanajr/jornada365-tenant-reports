@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.4.0
+Stable tag: 1.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,21 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.4.1 =
+English
+
+* Find Identity Score directly below Secure Score, including after an upgrade. Open the entry to review the score or see which configuration or consent is needed.
+* Compare aligned metric cards across reports. Managed apps uses the full summary row and puts assignments and device failures in the first columns.
+* Use the browser's Back and Forward buttons between reports and jump to a section in tenant settings. The header gives more space to the organization name.
+* OneDrive quota health uses only accounts with a known quota. The chart identifies accounts without a measurement.
+
+Português do Brasil
+
+* O Identity Score aparece logo abaixo de Secure Score, inclusive após uma atualização. Abra o item para consultar a pontuação ou conferir a configuração ou o consentimento necessário.
+* Os indicadores ficaram alinhados nos relatórios. Em Apps gerenciados, os cartões ocupam a largura do painel e as primeiras colunas dão acesso às atribuições e aos dispositivos com falha.
+* Os botões Voltar e Avançar do navegador percorrem os relatórios. Em Configurações, é possível ir diretamente à seção desejada. O cabeçalho dá mais espaço ao nome da organização.
+* O indicador de cotas do OneDrive considera apenas as contas com medição. O gráfico identifica as contas sem cota informada.
+
 = 1.4.0 =
 English
 

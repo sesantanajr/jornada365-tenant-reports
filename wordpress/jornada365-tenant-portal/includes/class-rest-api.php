@@ -142,7 +142,11 @@ final class Rest_Api {
 	}
 
 	public static function capabilities( array $roles ): array {
-		return [ 'manageAccess' => self::has_role( $roles, self::MANAGE_ACCESS_ROLES ), 'manageApps' => self::has_role( $roles, self::MANAGE_APPS_ROLES ) ];
+		return [
+			'manageAccess'    => self::has_role( $roles, self::MANAGE_ACCESS_ROLES ),
+			'manageApps'      => self::has_role( $roles, self::MANAGE_APPS_ROLES ),
+			'updateTenantApp' => self::has_role( $roles, array_keys( Settings::CONNECT_ROLES ) ),
+		];
 	}
 
 	/**

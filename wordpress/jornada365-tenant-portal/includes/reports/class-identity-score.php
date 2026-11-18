@@ -12,16 +12,14 @@ final class Identity_Score extends Report_Base {
 
 	public function step( array $state, array $params, float $deadline ): array {
 		if ( 0 === $state['phase'] ) {
-			$done = $this->fetch_collection( $state, 'history', '/beta/directory/recommendations/tenantSecureScores', $deadline, [], static function ( $day ) {
-				$current = is_numeric( $day['tenantScore'] ?? null ) ? (float) $day['tenantScore'] : null;
-				$max     = is_numeric( $day['tenantMaxScore'] ?? null ) ? (float) $day['tenantMaxScore'] : null;
-				return [
-					'date'    => (string) ( $day['createDateTime'] ?? '' ),
-					'current' => $current,
-					'max'     => $max,
-					'percent' => null !== $current && $max > 0 ? round( 100 * $current / $max, 1 ) : null,
-				];
-			} );
+			try {
+				$done = $this->fetch_collection( $state, 'history', '/beta/directory/recommendations/tenantSecureScores', $deadline, [], self::score_day( ... ) );
+			} catch ( Graph_Exception $error ) {
+				if ( ! $error->is_forbidden() ) {
+					throw $error;
+				}
+				throw new Graph_Exception( 'O Microsoft Graph recusou a leitura do Identity Score. Confirme o consentimento de DirectoryRecommendations.Read.All. No acesso delegado, use uma função do Entra com leitura das recomendações, como Reports Reader.', 403, $error->graph_code() );
+			}
 			if ( $done ) {
 				$state['phase'] = 1;
 			}
@@ -44,6 +42,17 @@ final class Identity_Score extends Report_Base {
 			$done = true;
 		}
 		return [ 'state' => $state, 'progress' => $done ? 2 : 1, 'total' => 2, 'done' => $done, 'message' => 'Consultando recomendações de identidade…' ];
+	}
+
+	private static function score_day( array $day ): array {
+		$current = is_numeric( $day['tenantScore'] ?? null ) ? (float) $day['tenantScore'] : null;
+		$max     = is_numeric( $day['tenantMaxScore'] ?? null ) ? (float) $day['tenantMaxScore'] : null;
+		return [
+			'date'    => (string) ( $day['createDateTime'] ?? '' ),
+			'current' => $current,
+			'max'     => $max,
+			'percent' => null !== $current && $max > 0 ? round( 100 * $current / $max, 1 ) : null,
+		];
 	}
 
 	public function finalize( array $state, array $params ): array {

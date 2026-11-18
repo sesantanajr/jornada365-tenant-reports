@@ -123,7 +123,7 @@ final class Admin_Ui {
 							<p class="description">Verificado server-side via Graph (<code>memberOf/directoryRole</code>) <?php echo Settings::per_tenant() ? 'com o token delegado de quem entra' : 'com o token de aplicativo do tenant'; ?>. Atribuições PIM precisam estar <strong>ativas</strong>.</p>
 							<label><input type="checkbox" name="<?php echo esc_attr( Settings::OPTION ); ?>[allow_consenter]" value="1" <?php checked( $s['allow_consenter'] ); ?>> Permitir o administrador que <?php echo Settings::per_tenant() ? 'conectou o tenant' : 'aprovou o aplicativo'; ?> nas primeiras 24 h, mesmo sem função ativa (evita lockout logo após o onboarding com PIM). Depois disso valem só as funções de diretório.</label>
 						</fieldset></td></tr>
-					<tr><th scope="row">Módulos de relatório</th>
+					<tr id="j365-report-modules"><th scope="row">Módulos de relatório</th>
 						<td><fieldset>
 							<p class="description">Relatórios base (sempre ativos): Visão geral, Identidade, MFA, Dispositivos, Aplicativos, Acesso Condicional, Grupos, Licenciamento, Convidados, Domínios, Políticas de autenticação.</p>
 							<?php foreach ( Settings::MODULES as $key => $mod ) : ?>

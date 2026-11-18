@@ -381,7 +381,6 @@ final class Router {
 			$foot[] = '<a href="mailto:' . esc_attr( $support ) . '">' . esc_html( self::t( 'Suporte' ) ) . '</a>';
 		}
 		$foot[] = esc_html( self::t( 'Protegido pelo Microsoft Entra ID' ) );
-		$foot[] = esc_html( self::t( 'Processamento temporário cifrado' ) );
 		$credit = '<a class="sp-credit" href="' . esc_url( Settings::CREATOR_LINKEDIN ) . '" target="_blank" rel="noopener">'
 			. '<img src="' . esc_url( J365TP_URL . 'assets/img/creator-96.webp' ) . '" alt="" width="28" height="28" decoding="async">'
 			. '<span>' . esc_html( self::t( 'Projeto criado por' ) ) . ' <b>' . esc_html( Settings::CREATOR_NAME ) . '</b></span></a>';

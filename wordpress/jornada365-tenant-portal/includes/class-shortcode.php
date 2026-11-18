@@ -108,6 +108,8 @@ final class Shortcode {
 			'account'          => $per_tenant && $session ? [ 'tenantId' => $session['tenant_id'], 'clientId' => Tenant_Repository::client_id( $session['tenant'] ?? null ), 'upn' => $session['upn'] ] : null,
 			'logoutUrl'        => Request::route_url( 'auth/logout' ),
 			'consentUrl'       => Request::route_url( 'consent/start' ),
+			'modulesUrl'       => $session ? admin_url( 'admin.php?page=j365tp-settings#j365-report-modules' ) : '',
+			'canManageModules' => $session && current_user_can( 'manage_options' ),
 			'brand'            => Settings::brand_name(),
 			'appName'          => Settings::APP_NAME,
 			'privacyUrl'       => (string) Settings::get( 'privacy_url' ),

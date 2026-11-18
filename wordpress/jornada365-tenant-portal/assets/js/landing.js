@@ -222,7 +222,6 @@
 
   function trust() {
     const facts = [
-      ['cloud_dismiss', 'Processamento temporário cifrado', 'O WordPress cifra o progresso e o resultado com a chave da sessão. A entrega ao navegador remove o registro temporário. A limpeza periódica remove trabalhos inativos.'],
       ['document_lock', 'Relatórios e ações', 'Os relatórios consultam dados. Quando habilitadas, as ações exigem permissões adicionais e uma conta autorizada para executar a operação.'],
       PER ? ['certificate', 'Login pela Microsoft', 'A Microsoft aplica as políticas de acesso da empresa. O navegador envia os tokens ao portal nas chamadas autenticadas.']
         : ['certificate', 'Login pela Microsoft', 'O portal usa a credencial de aplicativo configurada pelo operador para consultar relatórios. Você entra pela Microsoft.'],

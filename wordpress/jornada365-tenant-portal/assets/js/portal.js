@@ -712,7 +712,6 @@
       ['Gerado em', fmtDate(when.toISOString())], ['Gerado por', user.upn || '—'], ['Escopo', scope || '—'],
       ['Planilhas', wb.sheets.map((s) => s.name).join(' · ')],
       ['Origem dos dados', t('Microsoft Graph, com as permissões de leitura disponíveis ao gerar cada relatório.')],
-      ['Privacidade', t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.')],
       ['Filtros', t('Cada planilha de dados é uma tabela do Excel: use os botões de filtro e ordenação no cabeçalho.')],
       ['Versão', APP + ' v' + (CFG.version || '')],
     ];
@@ -892,20 +891,23 @@
   function DataTable({ rows, columns, filters = [], facets = [], segments = null, searchKeys, name, pageSize = 50, onRowClick, emptyText = 'Nenhum registro.', compact = false, select = null, onDraw = null, sheet = '' }) {
     filters = (filters || []).filter(Boolean); // views may pass conditional filters as null
     const state = { q: '', filter: filters.find((f) => f.default)?.id || null, seg: (segments && segments.value) || 'all', sort: null, dir: 1, page: 0, pageSize };
+    const pageSizes = [...new Set([pageSize, 25, 50, 100, 250, 500])].sort((a, b) => a - b);
     const shown = columns.filter((c) => !c.exportOnly);
     const width = Math.min(860, shown.length * 145 + (select ? 46 : 0));
     const wrap = h('div', { class: 'dt' + (compact ? ' compact' : ''), style: '--table-min: ' + width + 'px' });
     const segBar = segments ? h('div', { class: 'segbar', role: 'group', 'aria-label': segments.label || 'Segmentos' }) : null;
     const toolbar = h('div', { class: 'toolbar' });
-    const chips = h('div', { class: 'chips' });
+    const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Filtros' });
     let qTimer = null; // large tenants: don't filter on every keystroke
     const search = h('input', { type: 'search', placeholder: 'Pesquisar…', 'aria-label': 'Pesquisar…', oninput: (e) => { const v = e.target.value.toLowerCase(); clearTimeout(qTimer); qTimer = setTimeout(() => { state.q = v; state.page = 0; draw(false); }, rows.length > 2000 ? 220 : 40); } });
     const count = h('span', { class: 'muted small count', role: 'status', 'aria-atomic': 'true' });
-    const btnCsv = h('button', { class: 'btn sm', onclick: () => exportRows(current(), columns, name, 'csv') }, icon('download'), raw('CSV'));
-    const btnXlsx = h('button', { class: 'btn sm xl', onclick: (e) => { const b = e.currentTarget; b.disabled = true; exportExcel(wrap, current(), columns, name, describe()).finally(() => { b.disabled = false; }); } }, icon('sheet'), raw('Excel'));
-    toolbar.append(h('label', { class: 'search' }, icon('search'), search), count, h('div', { class: 'tb-actions' }, btnCsv, btnXlsx));
+    const btnCsv = h('button', { class: 'btn sm', type: 'button', title: 'Exportar os resultados em CSV', onclick: () => exportRows(current(), columns, name, 'csv') }, raw('CSV'));
+    const btnXlsx = h('button', { class: 'btn sm xl', type: 'button', title: 'Exportar os resultados em Excel', onclick: (e) => { const b = e.currentTarget; b.disabled = true; exportExcel(wrap, current(), columns, name, describe()).finally(() => { b.disabled = false; }); } }, raw('Excel'));
+    const downloads = h('div', { class: 'tb-actions', role: 'group', 'aria-label': 'Exportar' }, icon('download'), btnCsv, btnXlsx);
+    toolbar.append(h('label', { class: 'search' }, icon('search'), search), count);
     const tablewrap = h('div', { class: 'tablewrap', tabindex: '0', role: 'region', 'aria-label': 'Tabela de resultados' });
     const columnOptions = shown.flatMap((col, i) => col.label ? [h('option', { value: String(i + (select ? 1 : 0)) }, col.label)] : []);
+    let columnObserver = null;
     if (columnOptions.length > 1) {
       const jump = h('select', { class: 'j365-input column-jump', 'aria-label': 'Ir para coluna', onchange: (event) => {
         const input = event.currentTarget;
@@ -920,7 +922,14 @@
         input.value = '';
       } }, h('option', { value: '' }, 'Ir para coluna'), ...columnOptions);
       toolbar.append(jump);
+      if (typeof ResizeObserver === 'function') {
+        columnObserver = new ResizeObserver(() => {
+          if (tablewrap.clientWidth) jump.hidden = tablewrap.scrollWidth <= tablewrap.clientWidth + 1;
+        });
+        columnObserver.observe(tablewrap);
+      }
     }
+    toolbar.append(downloads);
     const selectedFacets = new Map();
     const facetBar = facets.length ? h('div', { class: 'facet-bar', role: 'group', 'aria-label': 'Filtros' }) : null;
     const facetInputs = facets.map(({ key, label }) => {
@@ -1008,9 +1017,14 @@
       // Drill-down from a distribution bar: exact value, removable.
       if (state.match) chips.append(h('button', { type: 'button', class: 'chip active match', title: t('Remover filtro'), 'aria-label': t('Remover filtro') + ': ' + state.match.label, onclick: () => { state.match = null; state.page = 0; draw(); } }, raw(state.match.label), h('span', { class: 'chip-x', 'aria-hidden': 'true' }, raw('✕'))));
       const pool = base();
-      for (const f of filters) {
+      for (const [i, f] of filters.entries()) {
         const n = f.fn ? pool.filter(f.fn).length : pool.length;
-        chips.append(h('button', { class: 'chip' + (state.filter === f.id ? ' active' : ''), 'aria-pressed': state.filter === f.id ? 'true' : 'false', onclick: () => { state.filter = state.filter === f.id ? null : f.id; state.page = 0; draw(); } }, t(f.label), h('span', { class: 'chip-n' }, raw(num(n)))));
+        chips.append(h('button', { class: 'chip' + (state.filter === f.id ? ' active' : ''), type: 'button', 'data-filter-index': i, 'aria-pressed': state.filter === f.id ? 'true' : 'false', onclick: () => {
+          state.filter = state.filter === f.id ? null : f.id;
+          state.page = 0;
+          draw();
+          chips.querySelector('[data-filter-index="' + i + '"]')?.focus({ preventScroll: true });
+        } }, t(f.label), h('span', { class: 'chip-n' }, raw(num(n)))));
       }
     }
     function draw(updateOptions = true) {
@@ -1082,14 +1096,17 @@
         tbody.append(tr);
       }
       const horizontalOffset = tablewrap.scrollLeft;
-      tablewrap.replaceChildren(h('table', null, thead, tbody));
+      if (columnObserver && tablewrap.firstChild) columnObserver.unobserve(tablewrap.firstChild);
+      const table = h('table', null, thead, tbody);
+      tablewrap.replaceChildren(table);
+      columnObserver?.observe(table);
       tablewrap.scrollLeft = horizontalOffset;
       tablewrap.scrollTop = 0;
       pager.innerHTML = '';
       pager.append(
         h('span', null, t('Página {a} de {b}', { a: state.page + 1, b: pages })),
         h('div', { class: 'pager-actions' },
-          h('select', { class: 'j365-input', 'aria-label': 'Linhas por página', onchange: (e) => { state.pageSize = +e.target.value; state.page = 0; draw(); } }, ...[25, 50, 100, 250, 500].map((n) => h('option', { value: n, selected: n === state.pageSize }, t('{n}/página', { n })))),
+          h('select', { class: 'j365-input', 'aria-label': 'Linhas por página', onchange: (e) => { state.pageSize = +e.target.value; state.page = 0; draw(); pager.querySelector('select')?.focus({ preventScroll: true }); } }, ...pageSizes.map((n) => h('option', { value: n, selected: n === state.pageSize }, t('{n}/página', { n })))),
           h('button', { class: 'btn sm', disabled: state.page === 0, onclick: () => { state.page--; draw(false); } }, '‹ Anterior'),
           h('button', { class: 'btn sm', disabled: state.page >= pages - 1, onclick: () => { state.page++; draw(false); } }, 'Próxima ›')
         )
@@ -1132,15 +1149,15 @@
     const box = h('div', { class: 'kpis' });
     KPI_DATA.set(box, list);
     list.forEach((k, i) => {
-      const v = h('div', { class: 'v' }, raw('—'));
+      const v = h('span', { class: 'v' }, raw('—'));
       // NaN/Infinity (e.g. a sum over fields a partial payload does not carry) count as missing, never as "NaN".
       const missing = k.value === null || k.value === undefined || k.value === '' || (typeof k.value === 'number' && !isFinite(k.value));
       const numeric = !missing && !isNaN(Number(k.value));
       // Share of a total ("12% do total") when the view says what the total is.
-      const share = numeric && +k.of > 0 ? h('div', { class: 'kpi-of' }, raw(t(k.ofText || '{p} do total', { p: fmtPct(pctOf(Number(k.value), +k.of)) }))) : null;
+      const share = numeric && +k.of > 0 ? h('span', { class: 'kpi-of' }, raw(t(k.ofText || '{p} do total', { p: fmtPct(pctOf(Number(k.value), +k.of)) }))) : null;
       // Labels may break after "/" ("Enterprise/Education") instead of in the middle of a word.
       const el = h(k.onclick ? 'button' : 'div', { class: 'kpi ' + (k.cls || '') + (k.onclick ? ' link' : ''), type: k.onclick ? 'button' : null, onclick: k.onclick || null, title: k.title || null, style: `--i:${i}` },
-        h('div', { class: 'l' }, h('i', { class: 'kdot', 'aria-hidden': 'true' }), raw(t(k.label).replace(/\//g, '/\u200b'))), v, share);
+        h('span', { class: 'l' }, h('i', { class: 'kdot', 'aria-hidden': 'true' }), h('span', null, raw(t(k.label).replace(/\//g, '/\u200b')))), v, share);
       if (!numeric) { v.textContent = missing ? '—' : t(String(k.value)); if (v.textContent.length > 6) v.classList.add('txt'); }
       else countUp(v, Number(k.value), 900);
       box.append(el);
@@ -1422,23 +1439,24 @@
     Actions.init(App.me);
     const perm = App.me.permissions || {};
     const blocked = new Set(perm.blocked || []);
-    const groups = NAV.map((g) => ({ label: g.label, items: g.items.filter(([, , req]) => !req || [].concat(req).every((x) => reports.includes(x))) })).filter((g) => g.items.length);
+    const groups = NAV.map((g) => ({ label: g.label, items: g.items.filter(([id, , req]) => id === 'identityscore' || !req || [].concat(req).every((x) => reports.includes(x))) })).filter((g) => g.items.length);
     const avail = groups.flatMap((g) => g.items.map(([id]) => id));
 
     const closeMenu = h('button', { class: 'icon-btn drawer-close', type: 'button', 'aria-label': 'Fechar menu', title: 'Fechar menu', onclick: () => setMenu(false, true) }, raw('×'));
     const side = h('aside', { class: 'sidebar', id: 'j365-report-sidebar', 'aria-label': 'Relatórios' }, h('div', { class: 'side-brand' }, logo('side-logo'), h('span', { class: 'brand-chip' }, raw('Tenant')), closeMenu));
-    const navEl = h('nav', { class: 'side-nav' });
+    const navEl = h('nav', { class: 'side-nav', 'aria-label': 'Menu' });
     for (const g of groups) {
       navEl.append(h('div', { class: 'side-group' }, g.label));
       for (const [id, label, req, ic] of g.items) {
-        const locked = blocked.has(id) || [].concat(req || []).some((x) => blocked.has(x));
-        navEl.append(h('button', { class: 'side-link' + (locked ? ' locked' : ''), 'data-v': id, type: 'button', title: locked ? t('Permissão pendente de aprovação neste tenant') : null, onclick: () => { go(id); if (narrow.matches) setMenu(false, true); } }, icon(ic), h('span', null, label), locked ? icon('lock2', 'ico lockmark') : null));
+        const moduleOff = id === 'identityscore' && !reports.includes(id);
+        const locked = moduleOff || blocked.has(id) || [].concat(req || []).some((x) => blocked.has(x));
+        const lockTitle = moduleOff ? 'Módulo desativado no WordPress' : 'Permissão pendente de aprovação neste tenant';
+        navEl.append(h('button', { class: 'side-link' + (locked ? ' locked' : ''), 'data-v': id, type: 'button', title: locked ? t(lockTitle) : null, onclick: () => { go(id); if (narrow.matches) setMenu(false, true); } }, icon(ic), h('span', null, label), locked ? icon('lock2', 'ico lockmark') : null));
       }
     }
     const creator = window.J365Landing && window.J365Landing.creatorChip ? window.J365Landing.creatorChip('side-creator') : null;
     side.append(navEl, h('div', { class: 'side-foot' },
       (() => { const ls = langSwitch(); ls.classList.add('side-lang'); return ls; })(),
-      h('div', { class: 'side-priv' }, icon('lock'), h('div', null, h('strong', null, 'Privacidade dos relatórios'), h('span', null, 'Processamento temporário cifrado'))),
       creator,
       h('span', { class: 'side-ver' }, raw('v' + CFG.version))));
 
@@ -1448,10 +1466,10 @@
       h('div', { class: 'tenant-block' },
         menuButton,
         h('div', { class: 'tenant-avatar', 'aria-hidden': 'true' }, raw(initials(ten.name || ten.domain))),
-        h('div', { class: 'tenant-txt' }, h('div', { class: 'tenant-name' }, raw(ten.name || ten.domain || ten.id)), h('div', { class: 'tenant-meta' }, raw((ten.domain ? ten.domain + ' · ' : '') + ten.id)))),
+        h('div', { class: 'tenant-txt' }, h('div', { class: 'tenant-name', title: ten.name || ten.domain || ten.id }, raw(ten.name || ten.domain || ten.id)),
+          h('div', { class: 'tenant-meta', title: ten.id }, raw(ten.domain || ten.id)))),
       h('div', { class: 'head-tools' },
         h('button', { class: 'btn sm hdr-xl', type: 'button', onclick: executiveDialog, title: t('Excel pronto para a diretoria: indicadores, gráficos, destaques e planilhas com filtros de cada área — montado no seu navegador.') }, icon('sheet'), h('span', null, 'Excel executivo')),
-        h('span', { class: 'priv-pill', title: t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.') }, icon('lock'), h('span', null, 'Processamento temporário cifrado')),
         langSwitch(), themeToggle(),
         h('div', { class: 'user-chip' },
           h('div', { class: 'user-meta' }, h('strong', null, raw(u.name || u.upn)), h('span', null, roleNames.length ? raw(list(roleNames, 1)) : raw(u.upn))),
@@ -1548,7 +1566,7 @@
     };
     restoreMenu();
 
-    const go = (v, keepScroll = false) => {
+    const go = (v, keepScroll = false, replace = false) => {
       if (!avail.includes(v)) v = 'overview';
       App.view = v;
       for (const b of side.querySelectorAll('.side-link')) { const on = b.dataset.v === v; b.classList.toggle('active', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
@@ -1557,20 +1575,30 @@
       if (!keepScroll) view.classList.add('view-in');
       content.append(view);
       if (!keepScroll) window.scrollTo(0, 0);
-      try { history.replaceState(null, '', '#' + v); } catch (e) { /* ignore */ }
+      if (location.hash !== '#' + v) {
+        try {
+          if (replace) history.replaceState(null, '', '#' + v);
+          else history.pushState(null, '', '#' + v);
+        } catch (e) { /* The selected view remains available when History is restricted. */ }
+      }
     };
     App.go = go;
     if (!App.hashBound) {
       App.hashBound = true;
-      window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (v && v !== App.view && v !== 'setup' && App.go) App.go(v); });
+      window.addEventListener('hashchange', () => { const v = location.hash.slice(1) || 'overview'; if (v !== App.view && v !== 'setup' && App.go) App.go(v, false, true); });
     }
     if (reuse) {
       // Language switch: same view, same reports (from this tab's memory), same scroll position.
       const y = window.scrollY;
-      go(App.view, true);
+      go(App.view, true, true);
       requestAnimationFrame(() => window.scrollTo(0, y));
     } else {
-      go((location.hash.slice(1) !== 'setup' && location.hash.slice(1)) || App.view);
+      let destination = location.hash.slice(1);
+      try {
+        if (!destination && Date.now() < Number(sessionStorage.getItem('j365.identityScoreReturn'))) destination = 'identityscore';
+        sessionStorage.removeItem('j365.identityScoreReturn');
+      } catch (_) { /* Direct navigation still works when tab storage is disabled. */ }
+      go((destination !== 'setup' && destination) || App.view, false, true);
     }
     if (!reuse && CFG.setup && CFG.setup.can && CFG.setup.autoOpen && window.J365Landing) setTimeout(window.J365Landing.openSetup, 500);
     // "Atualizar o aplicativo" link sent to an administrator who is already signed in.
@@ -1580,7 +1608,9 @@
   }
 
   function renderLanding(message) {
+    if (location.hash === '#identityscore') rememberIdentityScore();
     App.detachMenu?.();
+    App.go = null;
     if (window.J365Landing) window.J365Landing.render(root, message);
   }
   document.addEventListener('j365:unauth', () => renderLanding(t('Sua sessão expirou. Entre novamente.')));
@@ -1591,13 +1621,9 @@
   }
 
   /* Report panel: executive hero (title, source, health ring, tools) + progress + body. */
-  // Cloud contour (an abstract echo of the Jornada 365 cloud outline) drawn behind the hero.
-  const HERO_ART = '<svg viewBox="0 0 640 240" preserveAspectRatio="xMaxYMid slice" aria-hidden="true"><g fill="none" stroke-linecap="round">'
-    + ['M286 214C238 214 222 168 256 146 262 102 318 84 350 112 370 58 452 46 486 104 528 92 566 122 556 160 590 168 600 214 552 214', 'M318 236C262 236 240 180 280 152 286 98 352 74 392 108 418 42 518 28 560 98 612 84 660 122 646 170', 'M250 196C214 196 204 160 228 142 232 112 272 98 296 118 312 80 372 70 398 112'].map((d, i) => `<path class="c${i + 1}" pathLength="1" d="${d}"/>`).join('')
-    + '</g></svg>';
   const navIcon = (type) => { for (const g of NAV) for (const [id, , req, ic] of g.items) if (id === type || [].concat(req || []).includes(type)) return ic; return 'chart'; };
   function reportPanel(type, params, title, build, opts = {}) {
-    const panel = h('div', { class: 'panel rp', 'data-report': type });
+    const panel = h('div', { class: 'panel rp', 'data-report': type, 'data-graph-source': opts.graphSource });
     PANEL_META.set(panel, { type, title: t(title), subtitle: opts.subtitle ? t(opts.subtitle) : '' });
     const h2 = h('h2', null, title);
     const status = h('div', { class: 'rp-status', role: 'status' });
@@ -1607,7 +1633,6 @@
     const ringBox = h('div', { class: 'rp-ring', hidden: true });
     const tools = h('div', { class: 'rp-tools' }, opts.controls || null, refresh, cancel, opts.tools || null);
     const hero = h('header', { class: 'rp-hero' },
-      h('div', { class: 'rp-art', 'aria-hidden': 'true', html: HERO_ART }),
       h('div', { class: 'rp-main' },
         h('div', { class: 'rp-ic', 'aria-hidden': 'true' }, icon(opts.icon || navIcon(type))),
         h('div', { class: 'rp-txt' }, h2, opts.subtitle ? h('p', { class: 'rp-sub' }, opts.subtitle) : null, status)),
@@ -1690,8 +1715,8 @@
 
   views.overview = () => { const offscreen = Array.isArray(App.harvesting); return reportPanel('overview', {}, 'Visão geral do tenant', (p) => {
     const c = p.counts || {}, o = p.org || {};
-    const box = h('div');
-    const group = (title, ic, items) => h('div', { class: 'kgroup' }, h('h3', null, icon(ic), h('span', null, title)), kpis(items));
+    const box = h('div', { class: 'overview-report' });
+    const group = (title, ic, items) => h('section', { class: 'kgroup' }, h('h3', null, icon(ic), h('span', null, title)), kpis(items));
     box.append(h('div', { class: 'kgroups' },
       group('Identidade', 'users', [
         { label: 'Usuários', value: c.users, onclick: () => App.go('identity') },
@@ -1801,7 +1826,7 @@
       vizCard('Por licença', barList(Object.entries(s.byLicense || {}).map(([k, v]) => [raw(k), v, () => table.setMatch('licenses', k, k)]), s.total, { limit: 8 }))));
     box.append(table);
     return box;
-  }, { subtitle: 'Fonte: /users (+signInActivity), /subscribedSkus, /directoryRoles. Clique na linha para detalhes.', ring: (p) => {
+  }, { subtitle: 'Consulte as licenças e as funções administrativas de cada usuário. Os dados de último acesso dependem da licença do Entra ID e das permissões de leitura.', graphSource: '/users /subscribedSkus /roleManagement/directory /directoryRoles', ring: (p) => {
     if (!p._meta.premium) return null;
     const d = App.me.defaults.inactive_days || 90, en = p.rows.filter((r) => r.enabled), act = en.filter((r) => r.daysSinceSignIn !== null && r.daysSinceSignIn <= d).length, pc = pctOf(act, en.length);
     return { pct: pc, label: t('das contas habilitadas usadas nos últimos {n} dias', { n: num(d) }), caption: t('{a} de {b} contas', { a: num(act), b: num(en.length) }), tone: toneFor(pc, 85, 70) };
@@ -1969,7 +1994,7 @@
       vizCard('Método padrão', barList(Object.entries(s.byDefault || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => [methodName(k), v]), s.total, { limit: 8 }))));
     box.append(table);
     return box;
-  }, { subtitle: 'Fonte: /reports/authenticationMethods/userRegistrationDetails (usuários desabilitados não são retornados pelo Graph). Métodos fracos: SMS, voz, e-mail, perguntas de segurança.', ring: (p) => {
+  }, { subtitle: 'Confira quais contas habilitadas registraram MFA e quais têm métodos resistentes a phishing. O relatório também identifica SMS, voz, e-mail e perguntas de segurança.', graphSource: '/reports/authenticationMethods/userRegistrationDetails', ring: (p) => {
     const s = p.summary, pc = pctOf(s.mfaRegistered, s.total);
     return { pct: pc, label: 'dos usuários com MFA registrado', caption: t('{p} com método resistente a phishing', { p: fmtPct(pctOf(s.phishingResistant, s.total)) }), tone: toneFor(pc, 95, 85) };
   } });
@@ -2243,15 +2268,21 @@
 
   views.managed_apps = () => reportPanel('managed_apps', {}, 'Apps gerenciados', (p) => {
     const open = (type, r) => modal(r.name || r.id, managedAppPanel(type, { id: r.id, name: r.name.slice(0, 200) }));
+    const appLink = (type, r, text, action) => {
+      const title = t(action, { s: r.name || r.id });
+      const count = type === 'app_failures';
+      const label = count ? text + ' · ' + title : title;
+      return h('button', { type: 'button', class: 'dt-drill' + (count && r.failedDevices > 0 ? ' has-failures' : ''), 'aria-label': label, title: label, onclick: () => open(type, r) }, raw(text));
+    };
     const table = DataTable({ rows: p.rows, name: 'intune-apps', sheet: 'Apps gerenciados', columns: [
-      { key: 'name', label: 'Aplicativo', wrap: true }, { key: 'publisher', label: 'Publisher' },
+      { key: 'name', label: 'Aplicativo', render: (r) => appLink('app_assignments', r, r.name || r.id, 'Ver atribuições de {s}') },
+      { key: 'failedDevices', label: 'Falhas', xlLabel: 'Dispositivos com falhas', sortValue: (r) => r.failedDevices,
+        render: (r) => appLink('app_failures', r, r.failedDevices == null ? t('Sem contagem') : num(r.failedDevices), 'Ver falhas de {s}'),
+        export: (r) => r.failedDevices ?? t('Sem contagem') },
+      { key: 'publisher', label: 'Publisher' },
       { key: 'type', label: 'Tipo' }, { key: 'state', label: 'Publicação', value: (r) => t(INTUNE_PUBLISHING[r.state] || r.state || 'Indeterminado') },
-      { key: 'failedDevices', label: 'Dispositivos com falhas', value: (r) => r.failedDevices ?? t('Sem contagem') },
       { key: 'modified', label: 'Última atualização', render: (r) => fmtDate(r.modified) },
       { key: 'id', label: 'ID do aplicativo', exportOnly: true },
-      { key: 'details', render: (r) => h('div', { class: 'actions' },
-        h('button', { class: 'btn sm', type: 'button', onclick: () => open('app_assignments', r) }, 'Ver atribuições'),
-        h('button', { class: 'btn sm', type: 'button', onclick: () => open('app_failures', r) }, 'Ver falhas')) },
     ], filters: [
       { id: 'failed', label: 'Com falhas', fn: (r) => r.failedDevices > 0 },
       { id: 'zero', label: 'Zero falhas', fn: (r) => r.failedDevices === 0 },
@@ -2261,7 +2292,7 @@
       { label: 'Apps gerenciados', value: p.summary.apps }, { label: 'Apps com falhas confirmadas', value: p.summary.withFailures, onclick: () => table.setFilter('failed') },
       { label: 'Apps sem contagem', value: p.summary.unknown, onclick: () => table.setFilter('unknown') },
     ]), table);
-  }, { subtitle: 'Catálogo do Intune e contagens por aplicativo (Microsoft Graph beta). Atribuições e dispositivos são consultados ao abrir os detalhes.' });
+  }, { subtitle: 'Selecione o aplicativo para ver as atribuições ou a contagem de falhas para consultar os dispositivos. As contagens vêm do Microsoft Graph beta.' });
 
   /* Conditional Access */
   views.ca = () => reportPanel('ca', {}, 'Políticas de Acesso Condicional', (p) => {
@@ -2305,7 +2336,7 @@
     }
     box.append(table);
     return box;
-  }, { subtitle: 'Fonte: /identity/conditionalAccess/policies com GUIDs resolvidos (usuários, grupos, funções, apps, named locations, authentication strengths).', ring: (p) => {
+  }, { subtitle: 'Veja a quem cada política se aplica, quais aplicativos ela protege, quem está excluído e quais condições de acesso ela exige.', graphSource: '/identity/conditionalAccess/policies /identity/conditionalAccess/namedLocations /policies/authenticationStrengthPolicies', ring: (p) => {
     const s = p.summary, pc = pctOf(s.enabled, s.total);
     return s.total ? { pct: pc, label: 'das políticas ativadas', caption: t('{n} exigem MFA', { n: num(s.requireMfa) }), tone: s.blockLegacy && s.requireMfa ? toneFor(pc, 70, 40) : 'warn' } : { pct: 0, label: 'das políticas ativadas', caption: t('Nenhuma política de Acesso Condicional'), tone: 'danger' };
   } });
@@ -2408,7 +2439,7 @@
     ] }));
     if (p._meta.catalog) box.append(h('p', { class: 'muted small foot-note' }, t('Nomes oficiais da Microsoft (catálogo de {s}).', { s: /^\d{4}-\d{2}-\d{2}$/.test(p._meta.catalog) ? isoDay(p._meta.catalog) : p._meta.catalog })));
     return box;
-  }, { subtitle: 'Fonte: /subscribedSkus + /users. Nomes dos produtos conforme a Microsoft; recupere licenças de contas desabilitadas, inativas, convidados e sobreposições.', ring: (p) => {
+  }, { subtitle: 'Compare as licenças disponíveis e atribuídas. Revise contas desabilitadas ou inativas, convidados licenciados e usuários com produtos sobrepostos.', graphSource: '/subscribedSkus /users', ring: (p) => {
     const s = p.summary, pc = pctOf(s.totalConsumed, s.totalEnabled);
     return s.totalEnabled ? { pct: Math.min(100, pc), label: 'dos lugares pagos em uso', caption: t('{n} lugares recuperáveis', { n: num(s.wasteSeats || 0) }), tone: pc > 100 ? 'danger' : pc >= 80 ? ((s.wasteSeats || 0) > (s.totalConsumed || 0) * 0.15 ? 'warn' : 'ok') : 'warn' } : null;
   } });
@@ -2432,7 +2463,7 @@
     }
     box.append(table);
     return box;
-  }, { subtitle: 'Fonte: /users (userType eq Guest). Revise convites pendentes antigos e convidados obsoletos.', ring: (p) => {
+  }, { subtitle: 'Verifique quais convidados aceitaram o convite, quais ainda não responderam e quais estão há mais tempo sem acessar o ambiente.', graphSource: '/users', ring: (p) => {
     const s = p.summary, ok = p.rows.filter((r) => r.state === 'Accepted' && !r.stale && r.enabled).length, pc = pctOf(ok, s.total);
     return s.total ? { pct: pc, label: 'dos convidados ativos e com convite aceito', caption: p._meta.premium ? t('{n} obsoletos', { n: num(s.stale) }) : '', tone: toneFor(pc, 80, 60) } : null;
   } });
@@ -2447,7 +2478,7 @@
       { key: 'passwordValidity', label: 'Validade da senha (dias)', exportOnly: true, export: (r) => (r.passwordValidity && r.passwordValidity < 2147483647 ? r.passwordValidity : t('Nunca expira')) },
     ] }));
     return box;
-  }, { subtitle: 'Fonte: /domains.', ring: (p) => {
+  }, { subtitle: 'Identifique o domínio padrão e confira a verificação, o tipo de autenticação e os serviços associados a cada domínio.', graphSource: '/domains', ring: (p) => {
     const s = p.summary, pc = pctOf(s.verified, s.total);
     return s.total ? { pct: pc, label: 'dos domínios verificados', caption: t('{n} federados', { n: num(s.federated) }), tone: toneFor(pc, 100, 80) } : null;
   } });
@@ -2481,7 +2512,7 @@
     ));
     if (sd && sd.enabled) box.append(h('div', { class: 'alert warn' }, 'Security Defaults ON: ideal para tenants simples, mas impede políticas de Acesso Condicional granulares. Em ambientes enterprise, desative e use CA com Authentication Strength.'));
     return box;
-  }, { subtitle: 'Fonte: identitySecurityDefaultsEnforcementPolicy, authenticationMethodsPolicy, authorizationPolicy.' });
+  }, { subtitle: 'Confira os padrões de segurança do diretório, os métodos de autenticação configurados e se os usuários podem consentir com aplicativos ou redefinir a própria senha.', graphSource: '/policies/identitySecurityDefaultsEnforcementPolicy /policies/authenticationMethodsPolicy /policies/authorizationPolicy' });
 
   /* Privileged access */
   views.privileged = () => reportPanel('privileged', {}, 'Acessos privilegiados (RBAC/PIM)', (p) => {
@@ -2510,7 +2541,7 @@
     }
     box.append(table);
     return box;
-  }, { subtitle: 'Fonte: roleManagement/directory (roleAssignmentScheduleInstances + roleEligibilityScheduleInstances). Funções privilegiadas conforme o rótulo PRIVILEGED da Microsoft.', ring: (p) => {
+  }, { subtitle: 'Veja quem tem acesso administrativo ativo ou elegível. A Microsoft classifica as funções privilegiadas. A elegibilidade via PIM depende de uma licença compatível.', graphSource: '/roleManagement/directory/roleAssignmentScheduleInstances /roleManagement/directory/roleEligibilityScheduleInstances /roleManagement/directory/roleDefinitions', ring: (p) => {
     if (p.summary.pim === false) return null;
     const priv = p.rows.filter((r) => r.privileged), jit = priv.filter((r) => !r.kind.startsWith('Permanente')).length, pc = pctOf(jit, priv.length);
     return priv.length ? { pct: pc, label: 'dos acessos privilegiados via PIM (just-in-time)', caption: t('{n} permanentes', { n: num(priv.length - jit) }), tone: toneFor(pc, 80, 50) } : null;
@@ -2535,7 +2566,7 @@
       ] }));
     }
     return box;
-  }, { subtitle: 'Fonte: identityProtection/riskyUsers + riskDetections (requer Entra ID P2).' });
+  }, { subtitle: 'Encontre usuários em risco, confira a gravidade e examine as detecções do Microsoft Entra ID Protection. Requer Entra ID P2.', graphSource: '/identityProtection/riskyUsers /identityProtection/riskDetections' });
 
   /* App security */
   views.appsec = () => reportPanel('appsec', {}, 'Aplicativos, consentimentos & credenciais', (p) => {
@@ -2581,7 +2612,7 @@
       { key: 'scopes', label: 'Todos os escopos', exportOnly: true }, { key: 'clientId', label: 'ID do cliente', exportOnly: true },
     ], filters: [{ id: 'risky', label: 'Com escopo de risco', fn: (r) => r.risky.length }, { id: 'tw', label: 'Tenant-wide', fn: (r) => r.tenantWide }] }));
     return box;
-  }, { subtitle: 'Fonte: /applications + /servicePrincipals + /oauth2PermissionGrants. Rotacione credenciais expirando e revise consentimentos de alto privilégio.', ring: (p) => {
+  }, { subtitle: 'Encontre credenciais expiradas ou próximas do vencimento e confira quais aplicativos receberam consentimento para acessar dados sensíveis.', graphSource: '/applications /servicePrincipals /oauth2PermissionGrants', ring: (p) => {
     const s = p.summary, undated = s.credsUndated ?? p.rows.filter((r) => r.daysToExpiry == null).length;
     const ok = Math.max(0, s.credsTotal - s.credsExpired - s.creds30 - undated), pc = pctOf(ok, s.credsTotal);
     return s.credsTotal ? { pct: pc, label: 'das credenciais de apps em dia', caption: t('{n} expiradas', { n: num(s.credsExpired) }), tone: s.credsExpired ? 'danger' : toneFor(pc, 90, 75) } : null;
@@ -2622,12 +2653,45 @@
       { key: 'state', label: 'Estado', exportOnly: true }, { key: 'description', label: 'Descrição', exportOnly: true }, { key: 'remediation', label: 'Remediação', exportOnly: true },
     ], filters: [{ id: 'gap', label: 'Com ganho', fn: (r) => r.gap > 0 }, { id: 'identity', label: 'Identidade', fn: (r) => /identity/i.test(r.category) }] }));
     return box;
-  }, { subtitle: 'Fonte: security/secureScores + secureScoreControlProfiles.', ring: (p) => {
+  }, { subtitle: 'Compare a pontuação de segurança com o máximo disponível e identifique os controles que oferecem o maior ganho potencial.', graphSource: '/security/secureScores /security/secureScoreControlProfiles', ring: (p) => {
     const s = p.summary;
     return s.percent === null || s.percent === undefined ? null : { pct: s.percent, label: 'Microsoft Secure Score', caption: t('{a} de {b} pontos', { a: num(Math.round(s.current)), b: num(Math.round(s.max)) }), tone: toneFor(s.percent, 70, 50) };
   } });
 
-  views.identityscore = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p) => {
+  function rememberIdentityScore() {
+    // OAuth callbacks return to the portal without its original fragment. Retain only this known view.
+    try { sessionStorage.setItem('j365.identityScoreReturn', String(Date.now() + 30 * 60 * 1000)); } catch (_) { /* optional */ }
+  }
+  const entraScoreLink = (style) => h('a', { class: style, href: 'https://entra.microsoft.com/#view/Microsoft_AAD_IAM/SecurityMenuBlade/~/IdentitySecureScore', target: '_blank', rel: 'noopener noreferrer' }, 'Abrir pontuação no Microsoft Entra');
+
+  function identityScoreAccess(moduleOff, permissions) {
+    const actions = h('div', { class: 'actions' });
+    const box = h('section', { class: 'panel' }, h('h2', null, 'Microsoft Entra Identity Score'));
+    const copyLink = (url, label) => h('button', { class: 'btn sm', type: 'button', onclick: (e) => J.copyText(url, e.currentTarget) }, label);
+    if (moduleOff) {
+      box.append(h('h3', null, 'Módulo desativado no WordPress'), h('p', null, 'O administrador do WordPress pode marcar Identity Score (Microsoft Entra) em Configurações → Módulos de relatório e salvar. Depois, um administrador do tenant aprova a leitura das recomendações.'));
+      if (CFG.modulesUrl) actions.append(CFG.canManageModules ? h('a', { class: 'btn primary sm', href: CFG.modulesUrl, target: '_blank', rel: 'noopener' }, 'Abrir módulos no WordPress') : copyLink(CFG.modulesUrl, 'Copiar link para o administrador do WordPress'));
+    } else {
+      const perTenant = (permissions.mode || CFG.tenancy) === 'per_tenant';
+      const can = App.me.user?.can || {};
+      box.append(h('h3', null, 'Aprovação pendente no tenant'), h('p', null, 'A leitura das pontuações e recomendações de identidade requer a permissão DirectoryRecommendations.Read.All.'));
+      box.append(h('p', null, perTenant ? 'Um administrador autorizado do tenant pode atualizar o aplicativo e aprovar a permissão na Microsoft.' : 'O operador do portal atualiza o registro do aplicativo no Assistente do WordPress. Depois, um Global Administrator ou Privileged Role Administrator aprova a permissão para este tenant.'));
+      if (!perTenant && CFG.setup?.can && window.J365Landing?.openSetup) actions.append(h('button', { class: 'btn sm', type: 'button', onclick: () => window.J365Landing.openSetup() }, 'Abrir assistente do aplicativo'));
+      if (permissions.approveUrl) {
+        if (perTenant ? can.updateTenantApp : can.manageAccess) actions.append(h('a', { class: 'btn primary sm', href: permissions.approveUrl, onclick: rememberIdentityScore }, perTenant ? 'Atualizar o aplicativo' : 'Aprovar agora'));
+        actions.append(copyLink(permissions.approveUrl, 'Copiar link para o administrador'));
+      }
+    }
+    actions.append(entraScoreLink('btn sm'), h('button', { class: 'btn sm', type: 'button', onclick: () => renderShell() }, 'Verificar acesso novamente'));
+    box.append(actions);
+    return box;
+  }
+  views.identityscore = () => {
+    const moduleOff = !(App.me.reports || []).includes('identityscore'), permissions = App.me.permissions || {};
+    if (moduleOff || (permissions.blocked || []).includes('identityscore')) return identityScoreAccess(moduleOff, permissions);
+    return identityScoreReport();
+  };
+  const identityScoreReport = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p) => {
     const s = p.summary;
     const box = h('div');
     const status = { active: 'Ativa', completedBySystem: 'Concluído pelo sistema', completedByUser: 'Concluído pelo usuário', dismissed: 'Descartada', postponed: 'Adiada', riskAccepted: 'Risco aceito', planned: 'Planejada', thirdParty: 'Resolvido por terceiro', alternateMitigation: 'Mitigação alternativa' };
@@ -2653,7 +2717,7 @@
         { key: 'percent', label: 'Identity Score (%)', render: (r) => r.percent == null ? '—' : num(r.percent) + '%' }],
     }));
     return box;
-  }, { subtitle: 'Pontuação diária e recomendações de identidade fornecidas pelo Microsoft Entra (Graph beta).', ring: ({ summary: s }) =>
+  }, { subtitle: 'Pontuação diária e recomendações de identidade fornecidas pelo Microsoft Entra (Graph beta).', tools: entraScoreLink('btn sm glass'), ring: ({ summary: s }) =>
     s.percent == null ? null : { pct: s.percent, label: 'Identity Score', caption: t('{a} de {b} pontos', { a: num(s.current), b: num(s.max) }), tone: toneFor(s.percent, 70, 50) } });
 
   /* M365 usage */
@@ -2708,7 +2772,7 @@
         ] });
         box.append(table);
         return box;
-      }, { subtitle: 'Fonte: getOffice365ActiveUserDetail + getTeamsUserActivityUserDetail (Microsoft Graph v1.0, CSV processado em memória). Datas = última atividade no período.', controls: form, ring: (p) => {
+      }, { subtitle: 'Veja quais serviços do Microsoft 365 e recursos do Teams os usuários utilizaram. As datas indicam a atividade mais recente no período selecionado.', graphSource: '/reports/getOffice365ActiveUserDetail /reports/getTeamsUserActivityUserDetail', controls: form, ring: (p) => {
         const lic = (p.rows || []).filter((r) => r.products?.length && !r.deleted), act = lic.filter((r) => !r.noActivity).length, pc = pctOf(act, lic.length);
         return lic.length ? { pct: pc, label: 'dos usuários licenciados com atividade no período', caption: t('{a} de {b} usuários', { a: num(act), b: num(lic.length) }), tone: toneFor(pc, 90, 75) } : null;
       } }));
@@ -3031,7 +3095,7 @@
     if (gate) box.append(gate);
     box.append(kpiSlot, quick, table, bar);
     return box;
-  }, { subtitle: 'Fonte: inventário de dispositivos (Entra ID + Intune). Ações: POST /deviceManagement/managedDevices/{id}/syncDevice · rebootNow · windowsDefenderScan · windowsDefenderUpdateSignatures (Microsoft Graph v1.0, delegadas, com a sua conta).' });
+  }, { subtitle: 'Selecione dispositivos do Intune para sincronizar ou reiniciar, iniciar uma verificação do Defender ou atualizar suas assinaturas. As ações usam as permissões da sua conta.', graphSource: '/deviceManagement/managedDevices/{id}/syncDevice /deviceManagement/managedDevices/{id}/rebootNow /deviceManagement/managedDevices/{id}/windowsDefenderScan /deviceManagement/managedDevices/{id}/windowsDefenderUpdateSignatures' });
 
   /* ------------------------------------------------------------ Exchange mailboxes */
   const QUOTA = { ok: ['Normal', 'ok'], warning: ['Em aviso', 'warn'], send_blocked: ['Não envia', 'danger'], blocked: ['Não envia nem recebe', 'danger'] };
@@ -3389,20 +3453,32 @@
     if (s.refreshDate) box.append(h('p', { class: 'muted small' }, t('Dados da Microsoft atualizados até {s}.', { s: isoDay(s.refreshDate) })));
     if (od.length || sp.length) {
       const odBands = [['Abaixo de 80%', od.filter((r) => r.pct !== null && r.pct < 80).length, null, 'ok'], ['80% a 90%', od.filter((r) => r.pct >= 80 && r.pct < 90).length, null, 'warn'], ['90% ou mais', od.filter((r) => r.pct >= 90).length, null, 'danger']];
+      const unknownQuota = od.filter((account) => !Number.isFinite(account.pct)).length;
+      if (unknownQuota) odBands.push(['Cota desconhecida', unknownQuota]);
       box.append(vizRow(
         od.length ? vizCard('OneDrive: uso do limite', donut(odBands, { total: od.length, centerLabel: t('contas') })) : null,
         vizCard('Armazenamento usado', donut([['OneDrive', s.odUsed || 0, () => show('onedrive')], ['SharePoint', s.spUsed || 0, () => show('sharepoint')]], { fmt: bytes, centerLabel: t('total') }))));
     }
     box.append(tabs, pane);
     return box;
-  }, { subtitle: 'Fonte: getOneDriveUsageAccountDetail + getSharePointSiteUsageDetail (Microsoft Graph v1.0, CSV processado em memória).', ring: (p) => {
-    const od = p.onedrive || [], ok = od.filter((r) => r.pct === null || r.pct === undefined || r.pct < 90).length, pc = pctOf(ok, od.length);
-    return od.length ? { pct: pc, label: 'das contas do OneDrive abaixo de 90% do limite', caption: t('{n} sites do SharePoint', { n: num((p.sharepoint || []).length) }), tone: toneFor(pc, 97, 90) } : null;
+  }, { subtitle: 'Compare o armazenamento usado por contas do OneDrive e sites do SharePoint. Identifique os maiores consumidores e confira quando houve atividade pela última vez.', graphSource: '/reports/getOneDriveUsageAccountDetail /reports/getSharePointSiteUsageDetail', ring: (p) => {
+    const accounts = p.onedrive || [];
+    const measured = accounts.filter((account) => Number.isFinite(account.pct));
+    if (!measured.length) return null;
+    const below = measured.filter((account) => account.pct < 90).length;
+    const pc = pctOf(below, measured.length);
+    return { pct: pc, label: 'das contas avaliadas abaixo de 90% da cota', caption: t('{a} de {b} contas com cota informada', { a: num(measured.length), b: num(accounts.length) }), tone: toneFor(pc, 97, 90) };
   } }); };
+
+  function workspaceHeading(title, description, controls) {
+    return h('header', { class: 'workspace-heading' },
+      h('div', null, h('h2', null, title), description ? h('p', { class: 'muted small' }, description) : null),
+      controls || null);
+  }
 
   /* Settings (tenant-level). Changes re-verify the directory role live on the server. */
   views.settings = () => {
-    const box = h('div');
+    const box = h('div', { class: 'settings-sections' });
     const ten = App.me.tenant, st = ten.settings || {}, can = (App.me.user && App.me.user.can) || {};
     const P = App.me.privacy || CFG.privacy || {};
     const note = (txt) => h('div', { class: 'alert warn small' }, txt);
@@ -3508,8 +3584,6 @@
 
     /* Privacy & data */
     const facts = [
-      ['Relatórios', t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.')],
-      ['Processamento em etapas', t('O progresso é cifrado com a chave da sessão. Consultas abandonadas entram na limpeza após {n} minutos de inatividade.', { n: P.jobTtlMinutes || 15 })],
       ['Sessão', t('Cookie cifrado (HttpOnly, Secure, SameSite) — sem sessão gravada no servidor. Sua função é revalidada no Entra ID a cada {n} min.', { n: P.roleCheckMinutes || 15 })],
       ['Credenciais', t(CFG.tenancy === 'per_tenant' ? 'O login ocorre na Microsoft. Os tokens delegados ficam nesta aba e acompanham as chamadas autorizadas ao portal.' : 'O login ocorre na Microsoft. O aplicativo do operador usa a credencial configurada no WordPress.')],
       ['Registro de segurança', t('Pseudonimizado (sem nomes, e-mails ou IP completo) e apagado após {n} dias.', { n: P.auditDays || 30 })],
@@ -3520,6 +3594,18 @@
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => { App.cache = {}; toast(t('Relatórios removidos desta aba.'), 'ok'); } }, icon('refresh'), 'Limpar relatórios desta aba'))));
 
     box.append(h('div', { class: 'panel' }, h('h2', null, 'Conexão do tenant'), kv([['Tenant', raw(ten.name || '—')], ['Tenant ID', raw(ten.id)], ['Consentido em', fmtDate(ten.consentedAt ? ten.consentedAt + 'Z' : '')], ['Consentido por', ten.consentedByYou ? t('Você') : t('Outro administrador (pseudonimizado)')], ['Revogar', t('Exclua o aplicativo empresarial {s} no Entra ID (Aplicativos empresariais).', { s: APP })]])));
+    const sections = Array.from(box.children);
+    const chooser = h('select', { class: 'j365-input', onchange: () => {
+      if (chooser.value === '') return;
+      const section = sections[Number(chooser.value)];
+      const heading = section.querySelector('h2');
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      section.scrollIntoView({ block: 'start' });
+      chooser.value = '';
+    } }, h('option', { value: '' }, 'Selecionar seção'),
+      ...sections.map((section, index) => h('option', { value: String(index) }, raw(section.querySelector('h2').textContent))));
+    box.prepend(h('div', { class: 'panel' }, workspaceHeading('Configurações', '', h('label', { class: 'settings-jump' }, 'Ir para seção', chooser))));
     return box;
   };
 
@@ -3563,8 +3649,7 @@
     let waitController = null;
     const stop = h('button', { class: 'btn sm', type: 'button', hidden: true, onclick: () => waitController?.abort() }, 'Cancelar espera');
     const view = h('section', { class: 'panel report-activity' },
-      h('div', { class: 'panel-head' }, h('h2', null, 'Meus relatórios'), h('div', { class: 'job-controls' }, stop, refresh)),
-      h('p', { class: 'muted' }, 'Retome consultas interrompidas desta sessão ou abra um resultado que já chegou a esta aba.'),
+      workspaceHeading('Meus relatórios', 'Retome consultas interrompidas desta sessão ou abra um resultado que já chegou a esta aba.', h('div', { class: 'job-controls' }, stop, refresh)),
       h('h3', null, 'No servidor'), notice, remote,
       h('h3', null, 'Disponíveis nesta aba'), local);
     const status = { pending: 'Aguardando', running: 'Em processamento', done: 'Pronto para abrir', error: 'Falhou' };
@@ -3648,7 +3733,7 @@
 
   views.audit = () => {
     const P = App.me.privacy || CFG.privacy || {};
-    const box = h('div', { class: 'panel' }, h('h2', null, 'Auditoria do tenant'), h('p', { class: 'muted small' }, t('Eventos deste portal, guardados por {n} dias. Filtre todo o período e carregue eventos anteriores para ampliar a pesquisa ou exportação.', { n: P.auditDays || 30 })));
+    const box = h('div', { class: 'panel' }, workspaceHeading('Auditoria do tenant', t('Eventos deste portal, guardados por {n} dias. Filtre todo o período e carregue eventos anteriores para ampliar a pesquisa ou exportação.', { n: P.auditDays || 30 })));
     const ACTOR = { you: ['Você', 'info'], other: ['Outro usuário (pseudônimo)', ''], system: ['Sistema', 'ok'] };
     const actions = { report_done: 'Relatório concluído', report_start: 'Relatório iniciado', report_error: 'Falha no relatório',
       login_success: 'Login concluído', login_error: 'Falha no login', consent_error: 'Falha no consentimento',
