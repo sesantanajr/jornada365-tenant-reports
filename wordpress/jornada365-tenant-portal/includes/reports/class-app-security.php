@@ -74,7 +74,7 @@ final class App_Security extends Report_Base {
 				] );
 			} catch ( Graph_Exception $e ) {
 				$this->optional_error( $state, 'Consentimentos OAuth (oauth2PermissionGrants) indisponíveis', $e );
-				$state['grants'] = [];
+				$state['grantsIncomplete'] = true;
 				$done            = true;
 			}
 			if ( ! $done ) {
@@ -219,6 +219,11 @@ final class App_Security extends Report_Base {
 			'riskyConsents'   => count( array_filter( $consents, fn( $c ) => $c['risky'] ) ),
 			'tenantWideConsents' => count( array_filter( $consents, fn( $c ) => $c['tenantWide'] ) ),
 		];
+		if ( ! empty( $state['grantsIncomplete'] ) ) {
+			foreach ( [ 'consents', 'riskyConsents', 'tenantWideConsents' ] as $metric ) {
+				$summary[ $metric ] = null;
+			}
+		}
 
 		return [
 			'rows'     => $creds,

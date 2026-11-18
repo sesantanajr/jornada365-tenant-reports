@@ -16,12 +16,16 @@
   const list = (arr, max = 3) => { arr = arr || []; if (!arr.length) return '—'; const s = arr.slice(0, max).map((x) => t(String(x))).join(', '); return arr.length > max ? s + ` (+${arr.length - max})` : s; };
   const alert = (msg) => toast(t(String(msg)), 'danger', 6000);
   /** 1536 → "1,5 KB" (binary units, like the Microsoft admin centers). */
+  const byteFormats = new Map();
   const bytes = (n) => {
     n = +n || 0;
     if (n <= 0) return '0 B';
     const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
     const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
-    return new Intl.NumberFormat(CFG.intl || 'pt-BR', { maximumFractionDigits: i >= 3 ? 1 : 0 }).format(n / 1024 ** i) + ' ' + u[i];
+    const digits = i >= 3 ? 1 : 0;
+    const locale = CFG.intl || 'pt-BR', key = locale + digits;
+    if (!byteFormats.has(key)) byteFormats.set(key, new Intl.NumberFormat(locale, { maximumFractionDigits: digits }));
+    return byteFormats.get(key).format(n / 1024 ** i) + ' ' + u[i];
   };
 
   /* Friendly names for authentication methods: registration report (userRegistrationDetails) and
@@ -80,7 +84,7 @@
         throw new Error(t('O servidor devolveu um estado inválido para o relatório.'));
       }
       onProgress(job);
-      if (job.status === 'error') throw new Error(t(job.message || 'Falha ao gerar relatório.'));
+      if (job.status === 'error') throw Object.assign(new Error(t(job.message || 'Falha ao gerar relatório.')), { failure: job.failure });
       if (job.status === 'done') break;
       if (job.retryAfter > 0) {
         idle = 0;
@@ -383,6 +387,7 @@
       tdC: wb.xf({ font: { sz: 10 }, border: { bottom: { color: XL.line } }, v: 'center', indent: 1, wrap: true }),
       tdW: wb.xf({ font: { sz: 10, color: XL.ink }, border: { bottom: { color: XL.line } }, v: 'center', wrap: true }),
       tdN: wb.xf({ font: { sz: 10 }, border: { bottom: { color: XL.line } }, fmt: '#,##0', v: 'center' }),
+      tdScore: wb.xf({ font: { sz: 10 }, border: { bottom: { color: XL.line } }, fmt: '0.00', v: 'center' }),
       tdGB: wb.xf({ font: { sz: 10 }, border: { bottom: { color: XL.line } }, fmt: '#,##0.00 "GB"', v: 'center' }),
       tdP: wb.xf({ font: { sz: 10, color: XL.muted }, border: { bottom: { color: XL.line } }, fmt: '0.0%', v: 'center' }),
       li: wb.xf({ font: { sz: 10.5, color: XL.ink }, border: { bottom: { color: XL.line } }, wrap: true, v: 'center', indent: 1 }),
@@ -406,14 +411,14 @@
         line: wb.xf({ fill: XL.soft, border: { bottom: { style: 'thick', color: tone ? fg : XL.sky }, right: { style: 'thick', color: 'FFFFFF' } } }),
       };
       band[tone] = {
-        big: wb.xf({ font: { b: true, sz: 26, color: ink }, fill: bg, h: 'center', v: 'center', fmt: '0%' }),
+        big: wb.xf({ font: { b: true, sz: 26, color: ink }, fill: bg, h: 'center', v: 'center', fmt: '0.##%' }),
         lbl: wb.xf({ font: { b: true, sz: 12, color: XL.ink }, fill: bg, v: 'bottom', indent: 1, wrap: true }),
         cap: wb.xf({ font: { sz: 10, color: XL.text2 }, fill: bg, v: 'top', indent: 1 }),
         pad: wb.xf({ fill: bg }),
       };
       tile[tone] = {
         area: wb.xf({ font: { b: true, sz: 10.5, color: XL.ink }, fill: XL.soft, v: 'bottom', indent: 1, border: { right: { style: 'thick', color: 'FFFFFF' } } }),
-        pct: wb.xf({ font: { b: true, sz: 24, color: ink }, fill: XL.soft, h: 'left', v: 'center', indent: 1, fmt: '0%', border: { right: { style: 'thick', color: 'FFFFFF' } } }),
+        pct: wb.xf({ font: { b: true, sz: 24, color: ink }, fill: XL.soft, h: 'left', v: 'center', indent: 1, fmt: '0.##%', border: { right: { style: 'thick', color: 'FFFFFF' } } }),
         num: wb.xf({ font: { b: true, sz: 24, color: ink }, fill: XL.soft, h: 'left', v: 'center', indent: 1, fmt: '#,##0', border: { right: { style: 'thick', color: 'FFFFFF' } } }),
         txt: wb.xf({ font: { b: true, sz: 14, color: ink }, fill: XL.soft, v: 'center', indent: 1, border: { right: { style: 'thick', color: 'FFFFFF' } } }),
         lbl: wb.xf({ font: { sz: 9, color: XL.text2 }, fill: XL.soft, v: 'top', indent: 1, wrap: true, border: { right: { style: 'thick', color: 'FFFFFF' } } }),
@@ -501,15 +506,16 @@
     /** Distribution: small table (category, quantity, share) + native chart. */
     function distBlock(ws, r, b) {
       const isBytes = b.opts && b.opts.fmt === bytes;
-      const timeSeries = b.opts?.kind === 'scoreHistory';
-      const items = (timeSeries ? b.items : b.items.filter(([, v]) => +v > 0)).slice(0, 12);
+      const monthly = b.opts?.kind === 'monthlyScore';
+      const timeSeries = monthly || b.opts?.kind === 'scoreHistory';
+      const items = (timeSeries ? b.items : b.items.filter(([, v]) => +v > 0)).slice(0, monthly ? 24 : 12);
       if (!items.length) return r;
       const total = Number.isFinite(+b.total) && +b.total > 0 && items.every(([, value]) => +value <= +b.total) ? +b.total : 0;
       const val = (v) => timeSeries ? v : (isBytes ? Math.round(((+v || 0) / 1073741824) * 100) / 100 : +v || 0);
       ws.height(r, 22).set(r, 1, b.title || t('Detalhamento'), st.h3).merge(r, 1, r, 6);
       r++;
       const top = r;
-      ws.set(r, 1, t(timeSeries ? 'Data da medição' : 'Categoria'), st.th).merge(r, 1, r, 3); ws.set(r, 2, null, st.th); ws.set(r, 3, null, st.th);
+      ws.set(r, 1, t(monthly ? 'Mês (UTC)' : timeSeries ? 'Data da medição' : 'Categoria'), st.th).merge(r, 1, r, 3); ws.set(r, 2, null, st.th); ws.set(r, 3, null, st.th);
       ws.set(r, 4, t(timeSeries ? 'Pontuação (%)' : (isBytes ? 'Tamanho' : 'Quantidade')), st.thR);
       if (!timeSeries) ws.set(r, 5, '%', st.thR);
       r++;
@@ -518,7 +524,7 @@
         const txt = textOf(label);
         if (txt.length > 34) ws.height(r, 15 * Math.min(3, Math.ceil(txt.length / 34)) + 3);
         ws.set(r, 1, txt, txt.length > 34 ? st.tdC : st.td).merge(r, 1, r, 3); ws.set(r, 2, null, st.td); ws.set(r, 3, null, st.td);
-        ws.set(r, 4, val(v), isBytes ? st.tdGB : st.tdN);
+        ws.set(r, 4, val(v), monthly ? st.tdScore : isBytes ? st.tdGB : st.tdN);
         ws.set(r, 5, total && !isBytes ? (+v || 0) / total : null, st.tdP);
         r++;
       }
@@ -550,6 +556,7 @@
         r += 2;
       }
       if (sec.error) { sum.set(r, 1, t('Não foi possível gerar esta seção: {s}', { s: sec.error }), st.note).merge(r, 1, r, COLS); r += 2; continue; }
+      if (sec.coverageNote) { sum.set(r, 1, sec.coverageNote, st.note).merge(r, 1, r, COLS); r += 2; }
       if (sec.ring) r = ringBand(sum, r, sec.ring);
       r = cards(sum, r, (sec.kpis || []).filter((k) => k && k.label).slice(0, multi ? 8 : 16));
       r = notesBlock(sum, r, [...(sec.insights || []), ...(sec.alerts || [])], multi ? 4 : 12);
@@ -580,7 +587,7 @@
         const indicator = section.ring;
         if (indicator && ['danger', 'warn'].includes(indicator.tone) && Number.isFinite(indicator.pct)) {
           const caption = indicator.caption ? ' · ' + indicator.caption : '';
-          record('Indicador da área', { tone: indicator.tone, text: fmtPct(indicator.pct) + ' ' + indicator.label + caption });
+          record('Indicador da área', { tone: indicator.tone, text: (indicator.pctText || fmtPct(indicator.pct)) + ' ' + indicator.label + caption });
         }
         if (section.error) record('Falha na consulta', { tone: 'danger', text: section.error });
       }
@@ -899,7 +906,12 @@
     const toolbar = h('div', { class: 'toolbar' });
     const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Filtros' });
     let qTimer = null; // large tenants: don't filter on every keystroke
-    const search = h('input', { type: 'search', placeholder: 'Pesquisar…', 'aria-label': 'Pesquisar…', oninput: (e) => { const v = e.target.value.toLowerCase(); clearTimeout(qTimer); qTimer = setTimeout(() => { state.q = v; state.page = 0; draw(false); }, rows.length > 2000 ? 220 : 40); } });
+    const search = h('input', { type: 'search', placeholder: 'Pesquisar…', 'aria-label': 'Pesquisar…', oninput: (e) => {
+      state.q = e.target.value.toLowerCase();
+      state.page = 0;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => draw(false), rows.length > 2000 ? 220 : 40);
+    } });
     const count = h('span', { class: 'muted small count', role: 'status', 'aria-atomic': 'true' });
     const btnCsv = h('button', { class: 'btn sm', type: 'button', title: 'Exportar os resultados em CSV', onclick: () => exportRows(current(), columns, name, 'csv') }, raw('CSV'));
     const btnXlsx = h('button', { class: 'btn sm xl', type: 'button', title: 'Exportar os resultados em Excel', onclick: (e) => { const b = e.currentTarget; b.disabled = true; exportExcel(wrap, current(), columns, name, describe()).finally(() => { b.disabled = false; }); } }, raw('Excel'));
@@ -923,8 +935,12 @@
       } }, h('option', { value: '' }, 'Ir para coluna'), ...columnOptions);
       toolbar.append(jump);
       if (typeof ResizeObserver === 'function') {
+        jump.hidden = true;
         columnObserver = new ResizeObserver(() => {
-          if (tablewrap.clientWidth) jump.hidden = tablewrap.scrollWidth <= tablewrap.clientWidth + 1;
+          const width = tablewrap.clientWidth;
+          if (!width) return;
+          if (name === 'intune-apps') tablewrap.style.setProperty('--app-table-viewport', width + 'px');
+          jump.hidden = tablewrap.scrollWidth <= width + 1;
         });
         columnObserver.observe(tablewrap);
       }
@@ -1156,7 +1172,7 @@
       // Share of a total ("12% do total") when the view says what the total is.
       const share = numeric && +k.of > 0 ? h('span', { class: 'kpi-of' }, raw(t(k.ofText || '{p} do total', { p: fmtPct(pctOf(Number(k.value), +k.of)) }))) : null;
       // Labels may break after "/" ("Enterprise/Education") instead of in the middle of a word.
-      const el = h(k.onclick ? 'button' : 'div', { class: 'kpi ' + (k.cls || '') + (k.onclick ? ' link' : ''), type: k.onclick ? 'button' : null, onclick: k.onclick || null, title: k.title || null, style: `--i:${i}` },
+      const el = h(k.onclick ? 'button' : 'div', { class: 'kpi ' + (missing ? 'unavailable' : k.cls || '') + (k.onclick ? ' link' : ''), type: k.onclick ? 'button' : null, onclick: k.onclick || null, title: k.title || (missing ? 'Não disponível' : null), style: `--i:${i}` },
         h('span', { class: 'l' }, h('i', { class: 'kdot', 'aria-hidden': 'true' }), h('span', null, raw(t(k.label).replace(/\//g, '/\u200b')))), v, share);
       if (!numeric) { v.textContent = missing ? '—' : t(String(k.value)); if (v.textContent.length > 6) v.classList.add('txt'); }
       else countUp(v, Number(k.value), 900);
@@ -1212,15 +1228,16 @@
   function ring(spec) {
     const pct = Number(spec.pct);
     const C = 2 * Math.PI * 52, id = 'jg' + (++svgSeq), target = (C * (1 - Math.min(100, Math.max(0, pct)) / 100)).toFixed(2);
-    const el = h('div', { class: 'ring ' + (spec.tone || 'info'), role: 'img', 'aria-label': fmtPct(pct) + ' — ' + t(spec.label || '') });
+    const pctText = spec.pctText || fmtPct(pct);
+    const el = h('div', { class: 'ring ' + (spec.tone || 'info'), role: 'img', 'aria-label': pctText + ' — ' + t(spec.label || '') });
     el.innerHTML = `<svg viewBox="0 0 120 120" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="s1"/><stop offset="1" class="s2"/></linearGradient></defs><circle class="ring-track" cx="60" cy="60" r="52"/><circle class="ring-val" cx="60" cy="60" r="52" stroke="url(#${id})" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${J.RM ? target : C.toFixed(2)}" transform="rotate(-90 60 60)"/></svg>`;
-    const b = h('b', null, raw(J.RM ? fmtPct(pct) : '0%'));
+    const b = h('b', null, raw(J.RM ? pctText : '0%'));
     el.append(h('div', { class: 'ring-txt' }, b));
     if (!J.RM) {
       const arc = el.querySelector('.ring-val');
       requestAnimationFrame(() => requestAnimationFrame(() => { arc.style.strokeDashoffset = target; }));
       const t0 = performance.now(), dur = 1300;
-      const step = (now) => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); b.textContent = k < 1 ? num(Math.round(pct * e)) + '%' : fmtPct(pct); if (k < 1) requestAnimationFrame(step); };
+      const step = (now) => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); b.textContent = k < 1 ? num(Math.round(pct * e)) + '%' : pctText; if (k < 1) requestAnimationFrame(step); };
       requestAnimationFrame(step);
     }
     return el;
@@ -1282,6 +1299,16 @@
 
   /* ------------------------------------------------------------- shell */
   const App = { me: null, view: 'overview', cache: {}, params: {}, inflight: {} };
+  function resetReportSession() {
+    App.onReportSettled = null;
+    for (const job of Object.values(App.inflight)) job.controller.abort();
+    for (const task of readJobs.values()) task.controller.abort();
+    readJobs.clear();
+    App.inflight = {};
+    App.cache = {};
+    App.params = {};
+    App.namesConcealed = null;
+  }
   /* One job per report+params: a re-render (language switch, coming back to a view) while a report is
      still running joins the job in progress instead of starting a second one. */
   function fetchReport(type, params, force, onProgress, signal) {
@@ -1293,8 +1320,16 @@
       f = App.inflight[key] = { listeners: new Set(), last: null, promise: null, controller: new AbortController() };
       const job = f;
       job.promise = runReport(type, params, (j) => { job.last = j; for (const fn of job.listeners) { try { fn(j); } catch (e) { /* panel gone */ } } }, job.controller.signal)
-        .then((payload) => { App.cache[key] = payload; return payload; })
-        .finally(() => { if (App.inflight[key] === job) delete App.inflight[key]; });
+        .then((payload) => {
+          if (App.inflight[key] === job) App.cache[key] = payload;
+          return payload;
+        })
+        .finally(() => {
+          if (App.inflight[key] === job) {
+            delete App.inflight[key];
+            App.onReportSettled?.();
+          }
+        });
     }
     f.listeners.add(onProgress);
     if (f.last) onProgress(f.last);
@@ -1414,15 +1449,48 @@
     },
   };
 
+  // A language change can reuse a pending read. A new /me response starts a separate account cache.
+  const tenantLogos = new WeakMap();
+  async function showTenantLogo(account, avatar) {
+    let entry = tenantLogos.get(account);
+    if (!entry || entry.expires <= Date.now()) {
+      entry = { expires: Date.now() + 60000 };
+      entry.image = api('tenant/logo', { passive: true, timeout: 6000 }).then(({logo}) => {
+        if (!logo || !['image/png', 'image/jpeg'].includes(logo.mime) || typeof logo.data !== 'string'
+          || logo.data.length > 87384 || !/^[a-zA-Z0-9+/]+={0,2}$/.test(logo.data)) return null;
+        entry.expires = Date.now() + 15 * 60000;
+        return logo;
+      }).catch(() => null);
+      tenantLogos.set(account, entry);
+    }
+    const logo = await entry.image;
+    if (!logo || !avatar.isConnected || App.me !== account) return;
+    const img = new Image();
+    img.alt = '';
+    img.onload = () => {
+      if (!avatar.isConnected || App.me !== account) return;
+      avatar.replaceChildren(img);
+      avatar.classList.add('has-logo');
+      avatar.classList.toggle('wide-logo', logo.wide === true);
+      avatar.classList.toggle('dark-logo', logo.dark === true);
+    };
+    img.src = 'data:' + logo.mime + ';base64,' + logo.data;
+  }
+
   async function renderShell(reuse = false) {
+    App.onReportSettled = null;
     App.detachMenu?.();
     if (!(reuse && App.me)) {
       root.innerHTML = '';
       root.className = 'j365tp app-root';
       root.append(h('div', { class: 'j365tp-boot' }, h('span', { class: 'spinner' }), 'Carregando o seu tenant…'));
       try {
-        App.me = await api('me', { timeout: REPORT_REQUEST_MS });
-        if (!App.me?.tenant || !App.me?.user) throw new Error(t('O servidor devolveu uma resposta inválida.'));
+        const account = await api('me', { timeout: REPORT_REQUEST_MS });
+        if (!account?.tenant || !account?.user) throw new Error(t('O servidor devolveu uma resposta inválida.'));
+        const previous = App.me;
+        if (previous && (previous.tenant.id !== account.tenant.id ||
+          (previous.user.oid || previous.user.upn) !== (account.user.oid || account.user.upn))) resetReportSession();
+        App.me = account;
       } catch (e) {
         if (e.message !== 'unauthenticated') {
           root.replaceChildren(h('div', { class: 'j365tp-boot boot-error' },
@@ -1462,12 +1530,13 @@
 
     const roleNames = (u.roles || []).map((r) => r.name).filter(Boolean);
     const menuButton = h('button', { class: 'icon-btn menu-toggle', type: 'button', 'aria-controls': side.id, onclick: () => setMenu(side.hidden, true) }, icon('menu'), h('span', null, 'Menu'));
+    const tenantAvatar = h('div', { class: 'tenant-avatar', 'aria-hidden': 'true' }, raw(initials(ten.name || ten.domain)));
     const header = h('header', { class: 'app-header' },
       h('div', { class: 'tenant-block' },
         menuButton,
-        h('div', { class: 'tenant-avatar', 'aria-hidden': 'true' }, raw(initials(ten.name || ten.domain))),
-        h('div', { class: 'tenant-txt' }, h('div', { class: 'tenant-name', title: ten.name || ten.domain || ten.id }, raw(ten.name || ten.domain || ten.id)),
-          h('div', { class: 'tenant-meta', title: ten.id }, raw(ten.domain || ten.id)))),
+        h('div', { class: 'tenant-identity' }, tenantAvatar,
+          h('div', { class: 'tenant-txt' }, h('div', { class: 'tenant-name', title: ten.name || ten.domain || ten.id }, raw(ten.name || ten.domain || ten.id)),
+            h('div', { class: 'tenant-meta', title: ten.id }, raw(ten.domain || ten.id))))),
       h('div', { class: 'head-tools' },
         h('button', { class: 'btn sm hdr-xl', type: 'button', onclick: executiveDialog, title: t('Excel pronto para a diretoria: indicadores, gráficos, destaques e planilhas com filtros de cada área — montado no seu navegador.') }, icon('sheet'), h('span', null, 'Excel executivo')),
         langSwitch(), themeToggle(),
@@ -1567,6 +1636,7 @@
     restoreMenu();
 
     const go = (v, keepScroll = false, replace = false) => {
+      App.onReportSettled = null;
       if (!avail.includes(v)) v = 'overview';
       App.view = v;
       for (const b of side.querySelectorAll('.side-link')) { const on = b.dataset.v === v; b.classList.toggle('active', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
@@ -1600,6 +1670,7 @@
       } catch (_) { /* Direct navigation still works when tab storage is disabled. */ }
       go((destination !== 'setup' && destination) || App.view, false, true);
     }
+    void showTenantLogo(App.me, tenantAvatar);
     if (!reuse && CFG.setup && CFG.setup.can && CFG.setup.autoOpen && window.J365Landing) setTimeout(window.J365Landing.openSetup, 500);
     // "Atualizar o aplicativo" link sent to an administrator who is already signed in.
     if (!reuse && new URLSearchParams(location.search).get('connect') === '1' && window.J365Landing && window.J365Landing.openConnect) {
@@ -1611,6 +1682,8 @@
     if (location.hash === '#identityscore') rememberIdentityScore();
     App.detachMenu?.();
     App.go = null;
+    resetReportSession();
+    App.me = null;
     if (window.J365Landing) window.J365Landing.render(root, message);
   }
   document.addEventListener('j365:unauth', () => renderLanding(t('Sua sessão expirou. Entre novamente.')));
@@ -1622,12 +1695,119 @@
 
   /* Report panel: executive hero (title, source, health ring, tools) + progress + body. */
   const navIcon = (type) => { for (const g of NAV) for (const [id, , req, ic] of g.items) if (id === type || [].concat(req || []).includes(type)) return ic; return 'chart'; };
+  // Scopes used by the portal's read implementations. Optional sources are described separately.
+  const DIRECTORY_READ = ['Directory.Read.All'];
+  const DEVICE_READ = ['DeviceManagementManagedDevices.Read.All'];
+  const APPS_READ = ['DeviceManagementApps.Read.All'];
+  const USAGE_READ = ['Reports.Read.All'];
+  const REPORT_SCOPES = {
+    overview: DIRECTORY_READ, identity: DIRECTORY_READ, inactive: ['Directory.Read.All', 'AuditLog.Read.All'],
+    groups: DIRECTORY_READ, guests: DIRECTORY_READ, domains: DIRECTORY_READ, licensing: DIRECTORY_READ,
+    devices: ['Directory.Read.All', ...DEVICE_READ], apps: DEVICE_READ, app_devices: DEVICE_READ,
+    managed_apps: APPS_READ, intune_assignments: APPS_READ, app_assignments: APPS_READ, app_failures: APPS_READ,
+    device_compliance: ['DeviceManagementConfiguration.Read.All'], ca: ['Policy.Read.All'], authpolicies: ['Policy.Read.All'],
+    mfa: ['AuditLog.Read.All'], privileged: ['RoleManagement.Read.All'], risk: ['IdentityRiskyUser.Read.All'],
+    securescore: ['SecurityEvents.Read.All'], identityscore: ['DirectoryRecommendations.Read.All'],
+    appsec: ['Application.Read.All', 'Directory.Read.All'], usage: USAGE_READ, storage: USAGE_READ, mailboxes: USAGE_READ,
+  };
+  const LEARN = 'https://learn.microsoft.com/';
+  const REPORT_GUIDES = {
+    risk: ['graph/api/riskyuser-list?view=graph-rest-1.0', 'A lista de usuários em risco requer Entra ID P2.', 'Security Reader'],
+    riskEvents: ['graph/api/riskdetection-list?view=graph-rest-1.0', 'A API de detecções de risco requer Entra ID P1 ou P2.', 'Security Reader'],
+    mfa: ['graph/api/authenticationmethodsroot-list-userregistrationdetails?view=graph-rest-1.0', '', 'Reports Reader'],
+    ca: ['entra/identity/conditional-access/overview', 'O Acesso Condicional requer Entra ID P1 ou uma licença que o inclua.'],
+    privileged: ['entra/id-governance/licensing-fundamentals', 'A elegibilidade no PIM depende de uma licença compatível com o recurso.'],
+    securescore: ['graph/security-authorization', '', 'Security Reader'],
+    identityscore: ['graph/api/recommendation-tenantsecurescores?view=graph-rest-beta', '', 'Reports Reader'],
+  };
+  function reportGuide(type, section) {
+    if (type === 'risk' && section?.includes('IdentityRiskEvent.Read.All')) return [ ['IdentityRiskEvent.Read.All'], ...REPORT_GUIDES.riskEvents ];
+    const scopes = REPORT_SCOPES[type] || [];
+    let guide = REPORT_GUIDES[type];
+    if (scopes === USAGE_READ) guide = ['graph/reportroot-authorization', '', 'Reports Reader'];
+    if (['apps', 'app_devices', 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures', 'device_compliance'].includes(type)) {
+      guide = ['intune/developer/configure-graph-api-access', 'As consultas do Intune requerem uma licença ativa do Intune no tenant.'];
+    }
+    return [scopes, ...(guide || ['graph/permissions-reference'])];
+  }
+
+  function readIssue(e) {
+    if (e?.failure?.kind) return e.failure;
+    if (e?.data?.data?.failure?.kind) return e.data.data.failure;
+    const classify = kind => ({ kind, status: e?.status, code: e?.data?.code });
+    if (e?.message === 'unauthenticated' || e?.message === 'reauth' || e?.status === 401) return classify('session');
+    if (e?.data?.code === 'j365_csrf') return classify('page');
+    if (e?.status === 403) return classify('portal');
+    if (e?.status === 408 || e?.status === 429 || e?.status >= 500 || (e instanceof TypeError && /fetch|network/i.test(e.message))) return classify('temporary');
+    return classify('request');
+  }
+
+  function reportNotice(type, issue, detail, graphSource = '') {
+    const boxes = {
+      access: ['Acesso recusado pelo Microsoft Graph', 'O serviço recusou esta leitura. Confira os requisitos deste relatório com o administrador do tenant.'],
+      license: ['Recurso indisponível para este tenant', 'A Microsoft indicou uma restrição de licença ou de tipo de tenant. Peça ao administrador que verifique a cobertura do recurso.'],
+      consent: ['Permissão de leitura ausente', 'O token atual não contém a permissão indicada. Peça ao administrador para verificar o consentimento do aplicativo.'],
+      authorization: ['Autorização da Microsoft indisponível', 'Peça ao administrador para verificar a autorização do aplicativo neste tenant.'],
+      session: ['Entre novamente no portal', 'Sua sessão ou autorização de entrada expirou. Entre com a conta corporativa para continuar.'],
+      portal: ['Acesso recusado pelo portal', 'Verifique as permissões da sua conta no portal com o administrador.'],
+      page: ['Atualize a página do portal', 'A validação de segurança da página expirou. Recarregue a página antes de continuar.'],
+      temporary: ['Consulta temporariamente indisponível', 'A consulta não foi concluída. Tente novamente mais tarde.'],
+      host_limit: ['Limite de processamento da hospedagem', 'Peça ao operador do portal que verifique os limites de processamento da hospedagem.'],
+      unavailable: ['Recurso indisponível', 'A Microsoft não localizou o recurso solicitado. Confira se ele existe e está disponível neste tenant.'],
+      cancelled: ['Espera cancelada', 'Consulte Meus relatórios para retomar a leitura da sua sessão.'],
+      request: ['Não foi possível concluir a consulta', 'Informe ao operador do portal qual relatório estava aberto e quando a falha ocorreu.'],
+    };
+    const [title, description] = boxes[issue.kind] || boxes.request;
+    const content = h('div', { class: 'report-notice' }, h('strong', null, title), h('p', null, description));
+    const summary = [t(title), t(description)];
+    if (['access', 'license', 'consent'].includes(issue.kind)) {
+      const [scopes, doc, license, role] = reportGuide(type, issue.section);
+      const permissions = App.me?.permissions || {};
+      const consentScopes = type === 'risk' ? ['IdentityRiskyUser.Read.All', 'IdentityRiskEvent.Read.All'] : scopes;
+      const relevant = issue.kind === 'consent' ? consentScopes.filter(s => (permissions.missing || []).includes(s)) : scopes;
+      const list = h('ul');
+      function item(text) { summary.push(text); list.append(h('li', null, raw(text))); }
+      if (relevant.length) item(t('Permissões de leitura usadas pelo portal: {s}.', { s: relevant.join(', ') }));
+      if (license) item(t(license));
+      if (type === 'risk' && !issue.section) item(t('As detecções usam IdentityRiskEvent.Read.All e requerem Entra ID P1 ou P2.'));
+      if (role && (permissions.mode || CFG.tenancy) === 'per_tenant') item(t('No acesso delegado, uma função compatível é {s}.', { s: role }));
+      content.append(list, h('a', { href: LEARN + doc, target: '_blank', rel: 'noopener noreferrer' }, 'Requisitos na Microsoft Learn'));
+      if (issue.kind === 'consent' && permissions.approveUrl) {
+        const perTenant = (permissions.mode || CFG.tenancy) === 'per_tenant';
+        const can = App.me?.user?.can || {};
+        const actions = h('div', { class: 'actions' });
+        if (perTenant ? can.updateTenantApp : can.manageAccess) actions.append(h('a', { class: 'btn sm', href: permissions.approveUrl }, perTenant ? 'Atualizar o aplicativo' : 'Aprovar agora'));
+        actions.append(h('button', { class: 'btn sm', type: 'button', onclick: e => J.copyText(permissions.approveUrl, e.currentTarget) }, 'Copiar link para o administrador'));
+        content.append(actions);
+      }
+    } else if (issue.kind === 'page') {
+      content.append(h('button', { class: 'btn sm', type: 'button', onclick: () => location.reload() }, 'Recarregar a página'));
+    }
+    // Sources are static report paths. Service messages can contain a UPN, device name or URL.
+    const diagnosis = [];
+    if (Number.isInteger(issue.status) && issue.status >= 100 && issue.status <= 599) diagnosis.push('HTTP ' + issue.status);
+    if (typeof issue.code === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(issue.code)) diagnosis.push(issue.code);
+    if (!diagnosis.length && typeof detail === 'string') {
+      const status = /\b(?:HTTP|Graph)\s+(\d{3})\b/i.exec(detail);
+      if (status) diagnosis.push('HTTP ' + status[1]);
+    }
+    if (type === 'risk') {
+      graphSource = issue.section?.includes('IdentityRiskEvent.Read.All') ? '/identityProtection/riskDetections' : '/identityProtection/riskyUsers';
+    }
+    if (graphSource && ['access', 'license', 'request', 'unavailable', 'authorization'].includes(issue.kind)) diagnosis.push(graphSource);
+    if (diagnosis.length) {
+      content.append(h('details', null, h('summary', null, 'Detalhes técnicos'), ...diagnosis.map(text => h('p', null, raw(text)))));
+    }
+    return { content, summary: summary.join(' ') };
+  }
+
   function reportPanel(type, params, title, build, opts = {}) {
     const panel = h('div', { class: 'panel rp', 'data-report': type, 'data-graph-source': opts.graphSource });
     PANEL_META.set(panel, { type, title: t(title), subtitle: opts.subtitle ? t(opts.subtitle) : '' });
     const h2 = h('h2', null, title);
     const status = h('div', { class: 'rp-status', role: 'status' });
-    const refresh = h('button', { class: 'btn sm glass', type: 'button', onclick: () => load(true), title: 'Consultar o Microsoft Graph novamente' }, icon('refresh'), 'Gerar novamente');
+    const refreshLabel = h('span', null, 'Gerar novamente');
+    const refresh = h('button', { class: 'btn sm glass', type: 'button', onclick: () => load(true), title: 'Consultar o Microsoft Graph novamente' }, icon('refresh'), refreshLabel);
     let request = null;
     const cancel = h('button', { class: 'btn sm glass rp-cancel', type: 'button', hidden: true, onclick: () => request?.abort() }, 'Cancelar espera');
     const ringBox = h('div', { class: 'rp-ring', hidden: true });
@@ -1651,7 +1831,7 @@
         ringBox.innerHTML = '';
         const ok = spec && spec.pct !== null && spec.pct !== undefined && isFinite(spec.pct);
         ringBox.hidden = !ok;
-        PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { ring: ok ? { pct: +spec.pct, label: t(spec.label || ''), caption: spec.caption ? t(spec.caption) : '', tone: spec.tone || 'info' } : null }));
+        PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { ring: ok ? { pct: +spec.pct, pctText: spec.pctText, label: t(spec.label || ''), caption: spec.caption ? t(spec.caption) : '', tone: spec.tone || 'info' } : null }));
         if (!ok) return;
         ringBox.append(ring(spec), h('div', { class: 'rp-ring-txt' }, h('strong', null, spec.label || ''), spec.caption ? h('span', null, spec.caption) : null));
       },
@@ -1675,6 +1855,10 @@
       status.textContent = t('Consultando Microsoft Graph…');
       if (!lastGenerated) body.replaceChildren(skeleton());
       try {
+        const permissions = App.me?.permissions || {};
+        if (!force && ['partial', 'blocked'].includes(permissions.state) && (permissions.blocked || []).includes(type) && !App.cache[type + JSON.stringify(params)]) {
+          throw Object.assign(new Error(''), { failure: { kind: 'consent' } });
+        }
         const payload = await fetchReport(type, params, force, (job) => {
           if (job.total > 0) { bar.classList.remove('indeterminate'); bar.firstChild.style.width = Math.min(100, Math.round(100 * job.progress / job.total)) + '%'; }
           status.textContent = job.message ? t(job.message) : t('{n} processados…', { n: num(job.progress) });
@@ -1682,21 +1866,30 @@
         bar.style.display = 'none';
         const content = build(payload, ctx);
         const warnings = payload._meta?.warnings || [];
-        const notice = warnings.length ? h('div', { class: 'alert warn' }, h('strong', null, 'Avisos: '), h('ul', { class: 'list' }, ...warnings.map((w) => h('li', null, w)))) : null;
+        const issues = payload._meta?.issues || [];
+        const notices = issues.map(i => h('li', null, h('strong', null, i.section), reportNotice(type, i, '', opts.graphSource).content));
+        const other = warnings.filter(w => !issues.some(i => w.startsWith(i.section + ':')));
+        const notice = warnings.length || issues.length ? h('div', { class: 'alert warn report-partial' }, h('strong', null, 'Limitações desta consulta'), h('ul', { class: 'list' }, ...notices, ...other.map((w) => h('li', null, w)))) : null;
         body.replaceChildren(...(notice ? [notice, content] : [content]));
-        PANEL_META.set(panel, { ...PANEL_META.get(panel), generatedAt: payload._meta?.generated_at || null });
+        refreshLabel.textContent = t('Gerar novamente');
+        refresh.title = t('Consultar o Microsoft Graph novamente');
+        PANEL_META.set(panel, { ...PANEL_META.get(panel), generatedAt: payload._meta?.generated_at || null, coverageNote: notice ? t('Consulte as limitações desta coleta ao interpretar os indicadores.') : '' });
         lastGenerated = fmtDate(payload._meta?.generated_at);
         status.textContent = t('Gerado em {s}', { s: lastGenerated });
         if (opts.ring) { let spec = null; try { spec = opts.ring(payload); } catch (e) { spec = null; } ctx.setRing(spec); }
       } catch (e) {
-        if (e.message === 'unauthenticated') { PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { error: t('Sua sessão expirou. Entre novamente.') })); return; }
         bar.style.display = 'none';
         status.textContent = lastGenerated ? t('Exibindo a última consulta concluída em {s}.', { s: lastGenerated }) : '';
         if (!lastGenerated) body.replaceChildren();
-        const message = signal.aborted ? t('Espera cancelada. Você pode gerar o relatório novamente.') : t(e.message);
+        const issue = signal.aborted ? { kind: 'cancelled' } : readIssue(e);
+        const notice = reportNotice(type, issue, e.message, opts.graphSource);
+        if (['access', 'license', 'consent', 'authorization'].includes(issue.kind)) {
+          refreshLabel.textContent = t('Verificar acesso');
+          refresh.title = t('Verificar novamente após ajustar o acesso no tenant');
+        }
         feedback.hidden = false;
-        feedback.append(h('div', { class: 'alert ' + (signal.aborted || lastGenerated ? 'warn' : 'danger'), role: 'alert' }, raw(message)));
-        if (!lastGenerated) PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { error: message }));
+        feedback.append(h('div', { class: 'alert ' + (signal.aborted || lastGenerated ? 'warn' : 'danger'), role: 'alert' }, notice.content));
+        PANEL_META.set(panel, { ...PANEL_META.get(panel), ...(lastGenerated ? { coverageNote: t('A atualização falhou. Os dados exibidos pertencem à última consulta concluída.') } : { error: notice.summary }) });
       } finally {
         request = null;
         refresh.disabled = false;
@@ -2551,11 +2744,11 @@
   views.risk = () => reportPanel('risk', {}, 'Risco de identidade (Identity Protection)', (p) => {
     const s = p.summary, box = h('div');
     box.append(kpis([
-      { label: 'Usuários em risco', value: s.total, cls: s.total ? 'danger' : 'ok' }, { label: 'Alto', value: s.high, cls: 'danger' }, { label: 'Médio', value: s.medium, cls: 'warn' }, { label: 'Baixo', value: s.low }, { label: 'Comprometidos confirmados', value: s.confirmedCompromised, cls: 'danger' }, { label: 'Detecções (30 dias)', value: s.detections },
+      { label: 'Usuários em risco', value: s.total, cls: s.total == null ? '' : s.total ? 'danger' : 'ok' }, { label: 'Alto', value: s.high, cls: 'danger' }, { label: 'Médio', value: s.medium, cls: 'warn' }, { label: 'Baixo', value: s.low }, { label: 'Comprometidos confirmados', value: s.confirmedCompromised, cls: 'danger' }, { label: 'Detecções (30 dias)', value: s.detections },
     ]));
     if (s.total) box.append(vizRow(vizCard('Nível de risco', donut([['Alto', s.high, null, 'danger'], ['Médio', s.medium, null, 'warn'], ['Baixo', s.low, null, 'info']], { total: s.total, centerLabel: t('usuários'), key: 'level' }))));
     box.append(h('h3', null, 'Usuários em risco'));
-    box.append(DataTable({ rows: p.rows, name: 'usuarios-risco', sheet: 'Risco · Usuários', columns: [
+    box.append(DataTable({ rows: p.rows, name: 'usuarios-risco', sheet: 'Risco · Usuários', emptyText: s.total === null ? 'A lista de usuários em risco está indisponível.' : 'Nenhum usuário em risco foi retornado.', columns: [
       { key: 'displayName', label: 'Usuário' }, { key: 'upn', label: 'UPN' }, { key: 'level', label: 'Nível', render: (r) => badge(r.level, { high: 'danger', medium: 'warn', low: 'info' }[r.level] || '') }, { key: 'state', label: 'Estado', render: (r) => badge(r.state, r.state === 'confirmedCompromised' ? 'danger' : 'warn') }, { key: 'detail', label: 'Detalhe' }, { key: 'updated', label: 'Atualizado', render: (r) => fmtDate(r.updated), export: (r) => r.updated },
     ], filters: [{ id: 'high', label: 'Alto', fn: (r) => r.level === 'high' }, { id: 'atrisk', label: 'Em risco', fn: (r) => r.state === 'atRisk' }] }));
     if (p.detections && p.detections.length) {
@@ -2566,7 +2759,7 @@
       ] }));
     }
     return box;
-  }, { subtitle: 'Encontre usuários em risco, confira a gravidade e examine as detecções do Microsoft Entra ID Protection. Requer Entra ID P2.', graphSource: '/identityProtection/riskyUsers /identityProtection/riskDetections' });
+  }, { subtitle: 'Confira os usuários em risco com Entra ID P2 e as detecções dos últimos 30 dias com Entra ID P1 ou P2. As duas consultas usam permissões distintas.', graphSource: '/identityProtection/riskyUsers /identityProtection/riskDetections' });
 
   /* App security */
   views.appsec = () => reportPanel('appsec', {}, 'Aplicativos, consentimentos & credenciais', (p) => {
@@ -2582,7 +2775,7 @@
       const ok = Math.max(0, s.credsTotal - s.credsExpired - s.creds30 - undated);
       box.append(vizRow(
         vizCard('Credenciais', donut([['Mais de 30 dias', ok, () => credentials.setFilter('later'), 'ok'], ['Expiram em até 30 dias', s.creds30, () => credentials.setFilter('soon'), 'warn'], ['Expiradas', s.credsExpired, () => credentials.setFilter('exp'), 'danger'], ['Sem validade', undated, () => credentials.setFilter('noexp'), 'muted']], { centerLabel: t('credenciais'), key: 'status' })),
-        vizCard('Consentimentos OAuth', donut([['Com escopo de risco', s.riskyConsents, null, 'danger'], ['Demais', Math.max(0, s.consents - s.riskyConsents), null, 'info']], { centerLabel: t('consentimentos') }))));
+        s.consents == null ? null : vizCard('Consentimentos OAuth', donut([['Com escopo de risco', s.riskyConsents, null, 'danger'], ['Demais', Math.max(0, s.consents - s.riskyConsents), null, 'info']], { centerLabel: t('consentimentos') }))));
     }
     if (Array.isArray(p.rotation)) {
       box.append(h('h3', null, 'Plano de renovação de credenciais'));
@@ -2607,7 +2800,7 @@
     ], filters: [{ id: 'exp', label: 'Expiradas', fn: (r) => r.daysToExpiry !== null && r.daysToExpiry < 0 }, { id: 'soon', label: 'Expiram em até 30 dias', fn: (r) => r.daysToExpiry !== null && r.daysToExpiry >= 0 && r.daysToExpiry <= 30 }, { id: 'later', label: 'Mais de 30 dias', fn: (r) => r.daysToExpiry > 30 }, { id: 'noexp', label: 'Sem validade', fn: (r) => r.daysToExpiry === null }] });
     box.append(credentials);
     box.append(h('h3', { style: 'margin-top:16px' }, 'Consentimentos OAuth (delegados)'));
-    box.append(DataTable({ rows: p.consents, name: 'consentimentos', sheet: 'Consentimentos OAuth', onRowClick: (r) => modal(r.client || r.clientId, kv([['Cliente', r.client], [t('Escopos ({n})', { n: r.scopeCount }), r.scopes], ['Escopos de risco', r.risky.length ? r.risky : '—'], ['Tenant-wide', yesNo(r.tenantWide)], ['Concessões por usuário', r.userGrants]])), columns: [
+    box.append(DataTable({ rows: p.consents, name: 'consentimentos', emptyText: s.consents === null ? 'Indisponível.' : 'Nenhum registro.', sheet: 'Consentimentos OAuth', onRowClick: (r) => modal(r.client || r.clientId, kv([['Cliente', r.client], [t('Escopos ({n})', { n: r.scopeCount }), r.scopes], ['Escopos de risco', r.risky.length ? r.risky : '—'], ['Tenant-wide', yesNo(r.tenantWide)], ['Concessões por usuário', r.userGrants]])), columns: [
       { key: 'client', label: 'Aplicativo', wrap: true }, { key: 'scopeCount', label: 'Escopos' }, { key: 'risky', label: 'Escopos de risco', render: (r) => r.risky.length ? badge(list(r.risky, 2), 'danger') : '—', wrap: true }, { key: 'tenantWide', label: 'Tenant-wide', render: (r) => r.tenantWide ? badge('Sim', 'warn') : 'Usuário' }, { key: 'userGrants', label: 'Usuários' },
       { key: 'scopes', label: 'Todos os escopos', exportOnly: true }, { key: 'clientId', label: 'ID do cliente', exportOnly: true },
     ], filters: [{ id: 'risky', label: 'Com escopo de risco', fn: (r) => r.risky.length }, { id: 'tw', label: 'Tenant-wide', fn: (r) => r.tenantWide }] }));
@@ -2691,34 +2884,135 @@
     if (moduleOff || (permissions.blocked || []).includes('identityscore')) return identityScoreAccess(moduleOff, permissions);
     return identityScoreReport();
   };
-  const identityScoreReport = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p) => {
-    const s = p.summary;
-    const box = h('div');
+  const scoreStamp = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\d(?:T\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d))?$/.test(value)) return '';
+    const calendar = new Date(value.slice(0, 10) + 'T00:00:00Z'), actual = new Date(value);
+    return Number.isFinite(+actual) && Number.isFinite(+calendar) && calendar.toISOString().slice(0, 10) === value.slice(0, 10) ? actual.toISOString() : '';
+  };
+  const scorePercent = (d) => d && Number.isFinite(d.current) && Number.isFinite(d.max) && d.current >= 0 && d.max > 0 && d.current <= d.max ? 100 * d.current / d.max : null;
+  const scorePercentText = (n) => n == null ? '—' : Number(n.toFixed(2)).toLocaleString(CFG.intl || 'pt-BR') + '%';
+  const scoreUtcDay = (value) => scoreStamp(value).slice(0, 10);
+
+  function scoreCalendar(graph, archive, end, months) {
+    const bins = new Map(), start = new Date(end.slice(0, 7) + '-01T00:00:00Z');
+    start.setUTCMonth(start.getUTCMonth() - months + 1);
+    for (let i = 0; i < months; ++i) {
+      const month = start.toISOString().slice(0, 7);
+      bins.set(month, { month, date: '', current: null, max: null, percent: null, source: '', samples: 0 });
+      start.setUTCMonth(start.getUTCMonth() + 1);
+    }
+    // One observation per UTC day. A valid Graph observation takes priority over a local file.
+    const byDay = new Map();
+    for (const [source, rows] of [['Arquivo local', archive], ['Microsoft Graph', graph]]) {
+      for (const item of rows) {
+        const date = scoreStamp(item.date), day = date.slice(0, 10);
+        if (!bins.has(day.slice(0, 7)) || day > end) continue;
+        const percent = scorePercent(item), prior = byDay.get(day);
+        if (prior && (prior.percent != null && percent == null || (prior.percent == null) === (percent == null) && prior.source === source && prior.date >= date)) continue;
+        byDay.set(day, { date, current: item.current, max: item.max, percent, source });
+      }
+    }
+    const daily = [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date));
+    for (const day of daily) {
+      if (day.percent == null) continue;
+      const month = bins.get(day.date.slice(0, 7));
+      if (!month.samples) Object.assign(month, day);
+      month.samples++;
+    }
+    return { daily, months: [...bins.values()] };
+  }
+
+  function monthlyScoreChart(months) {
+    const chart = h('div', { class: 'score-days score-months', tabindex: '0', role: 'region', 'aria-label': 'Evolução mensal do Identity Score' });
+    const intl = new Intl.DateTimeFormat(CFG.intl || 'pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    for (const row of months) {
+      const label = intl.format(new Date(row.month + '-01T00:00:00Z'));
+      const detail = row.percent == null ? t('Sem medição válida') : t('{a} de {b} pontos', { a: num(row.current), b: num(row.max) }) + ' · ' + fmtDay(row.date.slice(0, 10)) + ' UTC';
+      chart.append(h('div', { class: 'score-day' + (row.percent == null ? ' missing' : ''), title: row.month + ' · ' + detail }, h('strong', null, raw(scorePercentText(row.percent))), h('span', { class: 'score-track', 'aria-hidden': 'true' }, row.percent == null ? null : h('i', { style: 'height:' + row.percent + '%' })), h('span', null, raw(label))));
+    }
+    BAR_DATA.set(chart, { items: months.map((row) => [row.month, row.percent == null ? null : Number(row.percent.toFixed(2))]), total: null, opts: { kind: 'monthlyScore' } });
+    return vizCard('Evolução mensal do Identity Score', chart);
+  }
+
+  function scoreArchiveControls(tenantId, graph, end, refresh) {
+    const format = 'j365.identity-score.v1', notice = h('p', { class: 'muted small', role: 'status' });
+    const picker = h('input', { type: 'file', accept: '.json,application/json', 'aria-label': 'Importar arquivo de histórico' });
+    picker.onchange = async () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      try {
+        if (file.size > 1024 * 1024) throw new Error('Arquivo de histórico inválido.');
+        const data = JSON.parse(await file.text());
+        if (data?.format !== format || !Array.isArray(data.observations) || data.observations.length > 1000) throw new Error('Arquivo de histórico inválido.');
+        if (typeof data.tenantId !== 'string' || data.tenantId.toLowerCase() !== tenantId) throw new Error('Este arquivo pertence a outro tenant.');
+        const imported = data.observations.map((d) => {
+          const date = scoreStamp(d?.date);
+          if (!date || date.slice(0, 10) > end || !Number.isSafeInteger(d.current) || !Number.isSafeInteger(d.max) || scorePercent(d) == null) throw new Error('Arquivo de histórico inválido.');
+          return { date, current: d.current, max: d.max };
+        });
+        const previous = App.params.identityArchive?.tenantId === tenantId ? App.params.identityArchive.days : [];
+        const days = scoreCalendar([], [...previous, ...imported], end, 24).daily;
+        App.params.identityArchive = { tenantId, days };
+        refresh();
+        notice.textContent = t('{n} dia(s) no arquivo local desta aba.', { n: num(days.length) });
+      } catch (err) { notice.textContent = t(err instanceof SyntaxError ? 'Arquivo de histórico inválido.' : err.message); }
+      picker.value = '';
+    };
+    const save = () => {
+      const archive = App.params.identityArchive?.tenantId === tenantId ? App.params.identityArchive.days : [];
+      const observations = scoreCalendar(graph, archive, end, 24).daily.filter((row) => row.percent != null).map(({ date, current, max }) => ({ date, current, max }));
+      if (!observations.length) { notice.textContent = t('Nenhuma medição válida para salvar.'); return; }
+      const url = URL.createObjectURL(new Blob([JSON.stringify({ format, tenantId, observations }, null, 2)], { type: 'application/json' }));
+      const a = h('a', { href: url, download: 'identity-score-' + end + '.json' });
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    };
+    return h('details', { class: 'score-archive' }, h('summary', null, 'Histórico em arquivo local'), h('p', null, 'Guarde a coleta em JSON e importe o arquivo em uma consulta futura para reunir até 24 meses. A importação é processada nesta aba. O arquivo contém o ID do tenant, datas e pontos.'),
+      h('div', { class: 'actions' }, h('button', { class: 'btn sm', type: 'button', onclick: save }, 'Salvar histórico em JSON'), h('label', null, h('span', null, 'Importar arquivo de histórico'), picker)), notice);
+  }
+
+  const identityScoreReport = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p, ctx) => {
+    const box = h('div'), body = h('div'), dailyTable = h('div'), tenantId = String(App.me.tenant.id || '').toLowerCase();
+    const end = scoreUtcDay(p._meta?.generated_at) || new Date().toISOString().slice(0, 10);
+    const selector = h('select', { class: 'j365-input', 'aria-label': 'Período do histórico' }, ...[3, 6, 12, 24].map((n) => h('option', { value: n, selected: (App.params.identityMonths || 12) === n }, t('{n} meses', { n }))));
+    const monthTitle = 'Fechamento mensal', title = 'Mês (UTC)', scoreTitle = 'Identity Score (%)';
+    const columns = [
+      { key: 'date', label: 'Data da medição (UTC)', render: (r) => fmtDay(r.date.slice(0, 10)), export: (r) => r.date.slice(0, 10) },
+      { key: 'current', label: 'Pontos' }, { key: 'max', label: 'Pontuação máxima' },
+      { key: 'percent', label: scoreTitle, render: (r) => scorePercentText(r.percent) },
+      { key: 'source', label: 'Origem da medição' },
+    ];
+    function draw() {
+      const archive = App.params.identityArchive?.tenantId === tenantId ? App.params.identityArchive.days : [];
+      const count = Number(selector.value), info = scoreCalendar(p.history || [], archive, end, count);
+      const covered = info.months.filter((m) => m.samples > 0), latest = covered.at(-1);
+      const coverage = t('{n} de {m} meses com medição válida.', { n: covered.length, m: count });
+      body.replaceChildren(kpis([
+        { label: 'Pontos', value: latest?.current }, { label: 'Pontuação máxima', value: latest?.max },
+        { label: 'Recomendações', value: p._meta?.recommendationsPartial ? null : p.rows.length }, { label: 'Meses com medição', value: covered.length, of: count, ofText: '{p} do período' },
+      ]));
+      const origin = latest?.source === 'Arquivo local' ? ' · ' + t('Arquivo local') : '';
+      ctx.setRing(latest ? { pct: latest.percent, pctText: scorePercentText(latest.percent), label: 'Identity Score', caption: t('{a} de {b} pontos', { a: num(latest.current), b: num(latest.max) }) + ' · ' + fmtDay(latest.date.slice(0, 10)) + ' UTC' + origin, tone: toneFor(latest.percent, 70, 50) } : null);
+      body.append(monthlyScoreChart(info.months), h('p', { class: 'muted small score-coverage' }, raw(coverage + ' ' + t('Cada mês usa a última medição válida em UTC. O Graph pode fornecer um histórico mais curto que o período selecionado.'))));
+      body.append(h('h3', null, monthTitle), DataTable({ rows: [...info.months].reverse(), name: 'identity-score-monthly', sheet: monthTitle, columns: [{ key: 'month', label: title }, ...columns, { key: 'samples', label: 'Dias com medição' }] }));
+      dailyTable.replaceChildren(DataTable({ rows: info.daily, name: 'identity-score-history', sheet: 'Histórico da pontuação', columns }));
+    }
+    selector.onchange = () => { App.params.identityMonths = Number(selector.value); draw(); };
+    box.append(h('div', { class: 'score-controls' }, h('label', null, 'Período do histórico', selector), tenantId ? scoreArchiveControls(tenantId, p.history || [], end, draw) : null), body);
+    draw();
     const status = { active: 'Ativa', completedBySystem: 'Concluído pelo sistema', completedByUser: 'Concluído pelo usuário', dismissed: 'Descartada', postponed: 'Adiada', riskAccepted: 'Risco aceito', planned: 'Planejada', thirdParty: 'Resolvido por terceiro', alternateMitigation: 'Mitigação alternativa' };
     const priority = { high: 'Alta', medium: 'Média', low: 'Baixa' };
-    if (s.percent == null) box.append(h('p', { class: 'alert warn' }, 'O Entra ainda não forneceu uma medição completa para este tenant.'));
-    box.append(kpis([
-      { label: 'Pontos', value: s.current }, { label: 'Pontuação máxima', value: s.max },
-      { label: 'Recomendações', value: p.rows.length }, { label: 'Medições', value: p.history.length },
-    ]));
-    if (s.date) box.append(h('p', { class: 'muted small' }, t('Medido em {s}.', { s: fmtDate(s.date) })));
-    if (p.history.length > 1) box.append(scoreHistory(p.history.slice(0, 8).reverse()));
     box.append(h('h3', null, 'Recomendações de identidade'), DataTable({
       rows: p.rows, name: 'identity-recommendations', sheet: 'Recomendações de identidade',
       columns: [
         { key: 'name', label: 'Recomendação', wrap: true }, { key: 'status', label: 'Estado', value: (r) => t(status[r.status] || r.status) },
         { key: 'priority', label: 'Prioridade', value: (r) => t(priority[r.priority] || r.priority) }, { key: 'current', label: 'Pontos' }, { key: 'max', label: 'Pontos máximos' },
-        { key: 'gap', label: 'Ganho possível' }, { key: 'checked', label: 'Última avaliação', render: (r) => fmtDate(r.checked) },
+        { key: 'gap', label: 'Ganho possível' }, { key: 'checked', label: 'Última avaliação (UTC)', render: (r) => fmtDay(scoreUtcDay(r.checked)), export: (r) => scoreUtcDay(r.checked) },
+        { key: 'modified', label: 'Estado atualizado (UTC)', render: (r) => fmtDay(scoreUtcDay(r.modified)), export: (r) => scoreUtcDay(r.modified) },
       ], filters: [{ id: 'active', label: 'Ativas', fn: (r) => r.status === 'active' }, { id: 'gap', label: 'Com ganho', fn: (r) => r.gap > 0 }],
-    }), h('h3', null, 'Histórico da pontuação'), DataTable({
-      rows: p.history, name: 'identity-score-history', sheet: 'Histórico da pontuação',
-      columns: [{ key: 'date', label: 'Data da medição', render: (r) => fmtDay(r.date.slice(0, 10)) },
-        { key: 'current', label: 'Pontos' }, { key: 'max', label: 'Pontuação máxima' },
-        { key: 'percent', label: 'Identity Score (%)', render: (r) => r.percent == null ? '—' : num(r.percent) + '%' }],
     }));
+    box.append(h('details', { class: 'score-archive' }, h('summary', null, 'Histórico da pontuação'), dailyTable));
     return box;
-  }, { subtitle: 'Pontuação diária e recomendações de identidade fornecidas pelo Microsoft Entra (Graph beta).', tools: entraScoreLink('btn sm glass'), ring: ({ summary: s }) =>
-    s.percent == null ? null : { pct: s.percent, label: 'Identity Score', caption: t('{a} de {b} pontos', { a: num(s.current), b: num(s.max) }), tone: toneFor(s.percent, 70, 50) } });
+  }, { subtitle: 'Acompanhe a evolução mensal e as recomendações de identidade do Microsoft Entra.', tools: entraScoreLink('btn sm glass') });
 
   /* M365 usage */
   views.usage = () => {
@@ -3363,7 +3657,13 @@
   } });
 
   /* ------------------------------------------------------------ OneDrive & SharePoint */
-  const siteName = (url) => { if (!url) return '—'; const m = String(url).match(/\/(?:sites|teams|personal)\/([^/?#]+)/i); return m ? decodeURIComponent(m[1]) : String(url).replace(/^https?:\/\//, ''); };
+  function siteName(url) {
+    if (!url) return '—';
+    const match = String(url).match(/\/(?:sites|teams|personal)\/([^/?#]+)/i);
+    if (!match) return String(url).replace(/^https?:\/\//, '');
+    try { return decodeURIComponent(match[1]); }
+    catch { return match[1]; }
+  }
   views.storage = () => { const offscreen = Array.isArray(App.harvesting); return reportPanel('storage', {}, 'OneDrive & SharePoint', (p) => {
     const s = p.summary || {}, hidden = !!p._meta.concealed;
     App.namesConcealed = hidden;
@@ -3417,12 +3717,12 @@
       const out = h('div');
       out.append(kpis([
         { label: 'Sites do SharePoint', value: s.spSites },
-        { label: 'Armazenamento usado', value: bytes(s.spUsed) },
+        { label: 'Armazenamento usado', value: s.spUsed == null ? '—' : bytes(s.spUsed) },
         { label: 'Acima de 90% do limite', value: s.spNear, cls: s.spNear ? 'warn' : 'ok', onclick: () => t2.setFilter('near') },
         { label: 'Sem atividade há 180 dias', value: s.spInactive, cls: s.spInactive ? 'warn' : 'ok', onclick: () => t2.setFilter('idle') },
       ]));
       out.append(topPanel(sp, (r) => (hidden && !r.url ? t('Site (oculto)') : siteName(r.url))));
-      const t2 = DataTable({ rows: sp, name: 'sharepoint', sheet: 'SharePoint', columns: [
+      const t2 = DataTable({ rows: sp, name: 'sharepoint', sheet: 'SharePoint', emptyText: s.spSites === null ? 'Armazenamento do SharePoint indisponível' : 'Nenhum registro.', columns: [
         { key: 'url', label: 'Site', render: (r) => h('span', { title: r.url }, raw(siteName(r.url))), export: (r) => r.url },
         { key: 'owner', label: 'Proprietário', render: (r) => raw(r.owner || '—') },
         { key: 'ownerUpn', label: 'UPN do proprietário', exportOnly: true },
@@ -3457,7 +3757,7 @@
       if (unknownQuota) odBands.push(['Cota desconhecida', unknownQuota]);
       box.append(vizRow(
         od.length ? vizCard('OneDrive: uso do limite', donut(odBands, { total: od.length, centerLabel: t('contas') })) : null,
-        vizCard('Armazenamento usado', donut([['OneDrive', s.odUsed || 0, () => show('onedrive')], ['SharePoint', s.spUsed || 0, () => show('sharepoint')]], { fmt: bytes, centerLabel: t('total') }))));
+        s.spUsed == null ? null : vizCard('Armazenamento usado', donut([['OneDrive', s.odUsed || 0, () => show('onedrive')], ['SharePoint', s.spUsed || 0, () => show('sharepoint')]], { fmt: bytes, centerLabel: t('total') }))));
     }
     box.append(tabs, pane);
     return box;
@@ -3644,21 +3944,42 @@
   views.activity = () => {
     const local = h('ul', { class: 'report-jobs' });
     const remote = h('ul', { class: 'report-jobs' });
+    const localCount = h('span', { class: 'activity-count' });
+    const remoteCount = h('span', { class: 'activity-count' }, raw('—'));
+    const emptyLocal = h('p', { class: 'activity-empty', hidden: true }, 'Escolha um relatório acima. Quando a consulta terminar, você poderá reabri-lo aqui.');
+    const emptyRemote = h('p', { class: 'activity-empty', hidden: true }, 'Tudo em dia. Suas consultas já entregues aparecem em Resultados nesta aba.');
     const notice = h('p', { class: 'muted small', role: 'status' });
-    const refresh = h('button', { class: 'btn sm', type: 'button', onclick: load }, icon('refresh'), 'Atualizar lista');
+    const actionNotice = h('p', { class: 'muted small', role: 'status' });
+    const refresh = h('button', { class: 'btn sm', type: 'button', onclick: () => { actionNotice.textContent = ''; return load(); } }, icon('refresh'), 'Atualizar lista');
     let waitController = null;
     const stop = h('button', { class: 'btn sm', type: 'button', hidden: true, onclick: () => waitController?.abort() }, 'Cancelar espera');
+    const enabled = App.me.reports || [];
+    const blocked = new Set(App.me.permissions?.blocked || []);
+    const choices = NAV.flatMap((group) => {
+      const available = group.items.filter(([, , required]) => typeof required === 'string' && enabled.includes(required) && !blocked.has(required));
+      return available.length ? [h('optgroup', { label: t(group.label) }, ...available.map(([id, label]) => h('option', { value: id }, label)))] : [];
+    });
+    const picker = h('select', { class: 'j365-input', required: true }, h('option', { value: '' }, 'Escolher relatório'), ...choices);
+    const launch = h('form', { class: 'activity-launch', onsubmit: (event) => {
+      event.preventDefault();
+      if (picker.value) App.go(picker.value);
+    } }, h('label', null, 'Consultar um relatório', picker), h('button', { class: 'btn primary', type: 'submit' }, icon('chart'), 'Consultar'));
     const view = h('section', { class: 'panel report-activity' },
-      workspaceHeading('Meus relatórios', 'Retome consultas interrompidas desta sessão ou abra um resultado que já chegou a esta aba.', h('div', { class: 'job-controls' }, stop, refresh)),
-      h('h3', null, 'No servidor'), notice, remote,
-      h('h3', null, 'Disponíveis nesta aba'), local);
+      workspaceHeading('Meus relatórios', 'Consulte um relatório, reabra um resultado ou retome uma consulta interrompida.', h('div', { class: 'job-controls' }, stop, refresh)),
+      choices.length ? launch : null,
+      h('section', { class: 'activity-section' }, h('h3', null, 'Resultados nesta aba', localCount),
+        h('p', { class: 'muted small' }, 'Você pode reabrir esses resultados sem consultar a Microsoft novamente. Para guardar uma cópia antes de recarregar ou fechar a aba, exporte o relatório.'),
+        emptyLocal, local),
+      h('section', { class: 'activity-section' }, h('h3', null, 'Consultas para acompanhar', remoteCount),
+        h('p', { class: 'muted small' }, t('Consultas em andamento, interrompidas ou à espera de retirada ficam disponíveis por até {n} minutos após a última atualização.', { n: App.me.privacy?.jobTtlMinutes || 15 })),
+        actionNotice, notice, emptyRemote, remote));
     const status = { pending: 'Aguardando', running: 'Em processamento', done: 'Pronto para abrir', error: 'Falhou' };
-    let busy = false;
+    let busy = false, needsRefresh = false, refreshTimer;
     const button = (label, click) => h('button', { class: 'btn sm', type: 'button', onclick: click }, label);
     const row = (title, detail, ...controls) => h('li', null,
       h('div', { class: 'job-info' }, h('strong', null, raw(title)), detail),
       h('div', { class: 'job-controls' }, ...controls));
-    const supported = (type) => App.me.reports.includes(type) && !type.startsWith('act_') && (type === 'app_devices' || type === 'device_compliance' || APP_REPORT_TITLES[type] || typeof views[type] === 'function');
+    const supported = (type) => enabled.includes(type) && !type.startsWith('act_') && (type === 'app_devices' || type === 'device_compliance' || APP_REPORT_TITLES[type] || typeof views[type] === 'function');
     function drawLocal() {
       const results = [...new Set(Object.values(App.cache))].filter((p) => supported(p?._meta?.report));
       results.sort((a, b) => String(b._meta.generated_at).localeCompare(String(a._meta.generated_at)));
@@ -3668,32 +3989,55 @@
         const title = reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
         return row(title, h('small', null, raw(fmtDate(m.generated_at))), button('Abrir relatório', () => openSessionReport(p)));
       }));
-      if (!results.length) local.append(h('li', { class: 'muted' }, 'Nenhum resultado disponível nesta aba.'));
+      localCount.textContent = num(results.length);
+      emptyLocal.hidden = results.length > 0;
     }
     async function load() {
       if (busy) return;
+      clearTimeout(refreshTimer);
+      needsRefresh = false;
       busy = true;
       refresh.disabled = true;
       notice.textContent = t('Carregando…');
-      drawLocal();
       try {
         const { jobs } = await api('jobs', { timeout: REPORT_REQUEST_MS });
+        if (!Array.isArray(jobs)) throw new Error(t('O servidor devolveu uma resposta inválida.'));
         const rows = jobs.filter((j) => supported(j.type) && Object.hasOwn(status, j.status));
         remote.replaceChildren(...rows.map((j) => {
-          const detail = h('small', null, t(status[j.status]), ' · ', raw(fmtDate(j.updatedAt)), ' · ', raw(j.job_id.slice(0, 8)));
-          if (j.message) detail.append(h('span', { class: 'job-message' }, j.message));
+          const detail = h('div', { class: 'job-meta' }, h('small', null,
+            badge(status[j.status], j.status === 'error' ? 'warn' : j.status === 'done' ? 'ok' : 'info'), ' · ', raw(fmtDate(j.updatedAt))));
+          if (j.status === 'error') detail.append(reportNotice(j.type, readIssue(j), j.message).content);
+          else if (j.message) detail.append(h('span', { class: 'job-message' }, j.message));
           return row(reportLabel(j.type), detail,
             j.status !== 'error' ? button(j.status === 'done' ? 'Abrir relatório' : 'Retomar relatório', () => manage(j, false)) : null,
             button('Descartar', () => manage(j, true)));
         }));
-        notice.textContent = rows.length === 50 ? t('Exibindo as 50 consultas mais recentes, com as que estão em andamento primeiro.') : rows.length ? '' : t('Nenhuma consulta pendente, resultado para retirar ou falha nesta sessão.');
-        drawLocal();
-      } catch (error) { notice.textContent = t(error.message); }
-      finally { busy = false; refresh.disabled = false; }
+        remoteCount.textContent = num(rows.length);
+        emptyRemote.hidden = rows.length > 0;
+        notice.textContent = rows.length === 50 ? t('Exibindo as 50 consultas mais recentes, com as que estão em andamento primeiro.') : '';
+      } catch (error) {
+        emptyRemote.hidden = true;
+        notice.textContent = t('Não foi possível atualizar a fila. Use Atualizar lista para tentar novamente.');
+      } finally {
+        busy = false;
+        refresh.disabled = false;
+        if (needsRefresh && view.isConnected) scheduleRefresh();
+      }
     }
+    function scheduleRefresh() {
+      needsRefresh = busy;
+      if (busy) return;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => { if (view.isConnected) load(); }, 150);
+    }
+    App.onReportSettled = () => {
+      if (view.isConnected) { drawLocal(); scheduleRefresh(); }
+    };
     async function manage(job, discard) {
       if (busy || (discard && !window.confirm(t('Descartar esta consulta e seus dados temporários?')))) return;
+      const sessionCache = App.cache;
       busy = true;
+      actionNotice.textContent = '';
       refresh.disabled = true;
       for (const b of remote.querySelectorAll('button')) b.disabled = true;
       try {
@@ -3708,16 +4052,17 @@
             new Error(t('O relatório excedeu o tempo de espera. Gere novamente para tentar.')));
           if (payload?._meta?.report !== job.type) throw new Error(t('O servidor devolveu um resultado inválido para o relatório.'));
           const params = payload._meta.params;
+          if (App.cache !== sessionCache) return;
           App.cache[job.type + JSON.stringify(Array.isArray(params) ? {} : (params || {}))] = payload;
+          drawLocal();
           if (view.isConnected) openSessionReport(payload);
         }
       } catch (error) {
         if (view.isConnected) {
-          if (waitController?.signal.aborted) notice.textContent = t('Espera interrompida. Você pode retomar o relatório enquanto ele estiver disponível.');
-          else notice.textContent = error.status === 404 ? t('O relatório foi retirado por outra aba, descartado ou expirou.') : t(error.message);
+          if (waitController?.signal.aborted) actionNotice.textContent = t('Espera interrompida. Você pode retomar o relatório enquanto ele estiver disponível.');
+          else actionNotice.textContent = error.status === 404 ? t('O relatório foi retirado por outra aba, descartado ou expirou.') : t(error.message);
         }
         drawLocal();
-        return;
       } finally {
         waitController = null;
         stop.hidden = true;
@@ -3727,6 +4072,7 @@
       }
       if (view.isConnected) await load();
     }
+    drawLocal();
     load();
     return view;
   };

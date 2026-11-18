@@ -167,7 +167,9 @@ abstract class Report_Base {
 		if ( 'j365_token' === $error->graph_code() ) {
 			throw $error;
 		}
-		$this->warn( $state, $label . ': ' . $error->getMessage() );
+		$issue = $error->report_issue();
+		$this->warn( $state, $label . ': Microsoft Graph' . ( $issue['status'] ? ' HTTP ' . $issue['status'] : '' ) . ( $issue['code'] ? ' (' . $issue['code'] . ')' : '' ) );
+		$state['_issues'][ $label ] = [ 'section' => $label ] + $issue;
 	}
 
 	/**
@@ -202,7 +204,7 @@ abstract class Report_Base {
 			return $fn();
 		} catch ( Graph_Exception $e ) {
 			if ( $e->is_license_gate() || $e->is_forbidden() ) {
-				$this->warn( $state, $feature . ': indisponível neste tenant (' . $e->getMessage() . ')' );
+				$this->optional_error( $state, $feature, $e );
 				return null;
 			}
 			throw $e;

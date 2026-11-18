@@ -40,10 +40,8 @@ final class Storage extends Report_Base {
 					[ 'siteUrl', 'siteURL', 'ownerDisplayName', 'ownerPrincipalName', 'isDeleted', 'lastActivityDate', 'fileCount', 'activeFileCount', 'pageViewCount', 'storageUsedByte', 'storageAllocatedByte', 'rootWebTemplate' ]
 				);
 			} catch ( Graph_Exception $e ) {
-				if ( 'j365_token' === $e->graph_code() ) {
-					throw $e;
-				}
-				$this->warn( $state, 'getSharePointSiteUsageDetail: ' . $e->getMessage() );
+				$this->optional_error( $state, 'Armazenamento do SharePoint indisponível', $e );
+				$state['spIncomplete'] = true;
 			}
 			$state['phase'] = 2;
 		}
@@ -113,6 +111,11 @@ final class Storage extends Report_Base {
 			'spInactive' => count( array_filter( $sp, static fn( $r ) => '' === $r['lastActivity'] || ( strtotime( $r['lastActivity'] ) ?: 0 ) < time() - 180 * DAY_IN_SECONDS ) ),
 			'refreshDate' => $refresh,
 		];
+		if ( ! empty( $state['spIncomplete'] ) ) {
+			foreach ( [ 'spSites', 'spUsed', 'spNear', 'spInactive' ] as $metric ) {
+				$summary[ $metric ] = null;
+			}
+		}
 		return [
 			'onedrive'   => $od,
 			'sharepoint' => $sp,

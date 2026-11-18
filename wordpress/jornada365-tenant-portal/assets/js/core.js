@@ -83,21 +83,29 @@
 
   /* ------------------------------------------------------------ formatting (active locale) */
   const calendarDate = /^\d{4}-\d{2}-\d{2}$/;
-  const calendarFormats = new Map();
+  const dateFormats = new Map();
+  function datesForLocale() {
+    if (!dateFormats.has(INTL)) {
+      dateFormats.set(INTL, {
+        calendar: new Intl.DateTimeFormat(INTL, { timeZone: 'UTC' }),
+        localDay: new Intl.DateTimeFormat(INTL),
+        localTime: new Intl.DateTimeFormat(INTL, { dateStyle: 'short', timeStyle: 'short' }),
+      });
+    }
+    return dateFormats.get(INTL);
+  }
   function fmtDay(iso) {
     if (!iso) return '—';
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return iso;
-    if (!calendarDate.test(iso)) return date.toLocaleDateString(INTL);
     // Graph date-only fields represent a calendar day regardless of the viewer's time zone.
-    if (!calendarFormats.has(INTL)) calendarFormats.set(INTL, new Intl.DateTimeFormat(INTL, { timeZone: 'UTC' }));
-    return calendarFormats.get(INTL).format(date);
+    return (calendarDate.test(iso) ? datesForLocale().calendar : datesForLocale().localDay).format(date);
   }
   function fmtDate(iso) {
     if (!iso) return '—';
     if (calendarDate.test(iso)) return fmtDay(iso);
     const date = new Date(iso);
-    return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(INTL, { dateStyle: 'short', timeStyle: 'short' });
+    return Number.isNaN(date.getTime()) ? iso : datesForLocale().localTime.format(date);
   }
   const num = (n) => (n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString(INTL));
   function sleep(ms, signal) {
@@ -247,7 +255,7 @@
       try { Object.assign(headers, await A.headers(!!opts.exo)); }
       catch (e) {
         signal?.throwIfAborted();
-        if (e.reauth) { A.resume(); throw new Error('reauth'); }
+        if (e.reauth && !opts.passive) { A.resume(); throw new Error('reauth'); }
         throw e;
       }
     }
@@ -271,6 +279,7 @@
     try { data = await res.json(); } catch (e) { /* non-JSON */ }
     signal?.throwIfAborted();
     // Expired or revoked delegated token: renew it once and repeat the call; otherwise renew the sign-in.
+    if (res.status === 401 && opts.passive) throw Object.assign(new Error('unauthenticated'), { status: 401 });
     if (res.status === 401 && data && data.code === 'j365_token' && tokens) {
       if (!renewed) {
         try { await A.token('graph', true); return requestApi(path, opts, signal, true); }

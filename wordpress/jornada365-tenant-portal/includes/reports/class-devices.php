@@ -71,7 +71,7 @@ final class Devices extends Report_Base {
 					$no_intune = 400 === $e->getCode() && (bool) preg_match( '/not applicable|not licensed|no license|licen[cs]/i', $e->getMessage() );
 					if ( ( in_array( $e->getCode(), [ 403, 404 ], true ) || $no_intune ) && empty( $state['intune_devices'] ) ) {
 						$state['intune_error'] = $no_intune ? 'license' : ( 403 === $e->getCode() ? 'forbidden' : 'unavailable' );
-						$this->warn( $state, 'Intune indisponível: ' . $e->getMessage() );
+						$this->optional_error( $state, 'Intune indisponível', $e );
 						$state['intune']         = false;
 						$state['intune_devices'] = [];
 						$done                    = true;

@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.4.1
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,23 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.5.0 =
+English
+
+* My reports now offers a report picker and shows delivered results separately from requests awaiting attention. Results appear as background queries finish.
+* The tenant header loads the organization's Microsoft Entra branding when available and uses initials as a fallback.
+* Identity Score shows points, percentage and monthly observations for periods up to 24 months. Import and export the tenant's history file locally to extend coverage across visits.
+* Report access messages explain relevant permissions, roles and licenses. The Risk report distinguishes unavailable data from confirmed counts.
+* Reused date and storage-size formatters reduce repeated work in table rendering. CSV and Excel apply the search text even when a download starts immediately after typing.
+
+Português do Brasil
+
+* Em Meus relatórios, escolha o que consultar e acompanhe separadamente os resultados entregues e as consultas pendentes. Um resultado aparece assim que a consulta termina.
+* O cabeçalho exibe a marca da organização configurada no Microsoft Entra quando disponível. As iniciais continuam como alternativa.
+* O Identity Score mostra pontos, percentual e evolução mensal em períodos de até 24 meses. Salve e importe o arquivo de histórico do tenant para ampliar a cobertura entre consultas.
+* As mensagens de acesso explicam permissões, funções e licenças pertinentes. O relatório de Risco distingue dados indisponíveis de contagens confirmadas.
+* A interface reutiliza a formatação de datas e volumes de armazenamento. CSV e Excel consideram o texto da pesquisa mesmo quando a exportação começa logo após digitar.
+
 = 1.4.1 =
 English
 

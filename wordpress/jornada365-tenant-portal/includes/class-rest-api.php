@@ -39,6 +39,7 @@ final class Rest_Api {
 		$change = [ $this, 'authorize_change' ];
 
 		register_rest_route( self::NS, '/me', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'me' ], 'permission_callback' => $auth ] );
+		register_rest_route( self::NS, '/tenant/logo', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'tenant_logo' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/reports/(?P<type>[a-z_]+)', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'start_report' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/jobs/(?P<id>[0-9a-f-]{36})/run', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'run_job' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/jobs', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'list_report_jobs' ], 'permission_callback' => $auth ] );
@@ -186,7 +187,15 @@ final class Rest_Api {
 			return new WP_Error( 'j365_token', $e->getMessage(), [ 'status' => 401 ] );
 		}
 		$status = $e instanceof \InvalidArgumentException ? 400 : ( $e instanceof Graph_Exception && $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500 );
-		return new WP_Error( 'j365_error', $e->getMessage(), [ 'status' => 403 === $status ? 424 : $status ] );
+		$data = [ 'status' => 403 === $status ? 424 : $status ];
+		if ( $e instanceof Graph_Exception ) {
+			$data['failure'] = $e->report_issue();
+		}
+		return new WP_Error( 'j365_error', $e->getMessage(), $data );
+	}
+
+	public function tenant_logo(): WP_REST_Response {
+		return new WP_REST_Response( [ 'logo' => Tenant_Logo::read( $this->session()['tenant_id'] ) ] );
 	}
 
 	public function me(): WP_REST_Response {

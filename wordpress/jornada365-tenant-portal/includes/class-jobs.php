@@ -116,7 +116,7 @@ final class Jobs {
 			$job_id = sprintf( '%s-%s-8%s-8%s-%s', substr( $hash, 0, 8 ), substr( $hash, 8, 4 ), substr( $hash, 12, 3 ), substr( $hash, 15, 3 ), substr( $hash, 18, 12 ) );
 			$row    = self::get( $job_id, $session );
 			if ( $row ) {
-				return [ 'job' => self::public_view( $row ) ];
+				return [ 'job' => self::public_view( $row, $session ) ];
 			}
 		} else {
 			$job_id = wp_generate_uuid4();
@@ -155,12 +155,12 @@ final class Jobs {
 			// A simultaneous retry can win the primary-key insert between SELECT and INSERT.
 			$row = $deduplicate ? self::get( $job_id, $session ) : null;
 			if ( $row ) {
-				return [ 'job' => self::public_view( $row ) ];
+				return [ 'job' => self::public_view( $row, $session ) ];
 			}
 			throw new \RuntimeException( 'Não foi possível iniciar o relatório. Verifique o banco de dados do WordPress.' );
 		}
 		Audit::log( 'report_start', $session['tenant_id'], $session['upn'], [ 'report' => $type ] );
-		return [ 'job' => self::public_view( $row ) ];
+		return [ 'job' => self::public_view( $row, $session ) ];
 	}
 
 	/** A job is only visible to the session that created it. */
@@ -174,8 +174,8 @@ final class Jobs {
 		return $row ?: null;
 	}
 
-	public static function public_view( array $row ): array {
-		return [
+	public static function public_view( array $row, ?array $session = null ): array {
+		$view = [
 			'job_id'   => $row['job_id'],
 			'type'     => $row['job_type'],
 			'status'   => $row['status'],
@@ -183,6 +183,13 @@ final class Jobs {
 			'total'    => (int) $row['total'],
 			'message'  => $row['message'],
 		];
+		if ( 'error' === $row['status'] && ! empty( $row['state'] ) && ! empty( $session['data_key'] ) ) {
+			$data = self::open( $row['state'], $session['data_key'] );
+			if ( isset( $data['failure'] ) && is_array( $data['failure'] ) ) {
+				$view['failure'] = $data['failure'];
+			}
+		}
+		return $view;
 	}
 
 	/** List metadata only. The encrypted report can be much larger than the list itself. */
@@ -196,7 +203,7 @@ final class Jobs {
 		$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - self::TTL );
 		$rows = $wpdb->get_results( $wpdb->prepare(
-			"SELECT job_id, job_type, status, progress, total, message, updated_at FROM {$table}
+			"SELECT job_id, job_type, status, progress, total, message, updated_at, CASE WHEN status = 'error' THEN state END AS state FROM {$table}
 			 WHERE tenant_id = %s AND user_oid = %s AND updated_at >= %s AND job_type IN ({$placeholders})
 			 ORDER BY CASE WHEN status IN ('pending','running') THEN 0 ELSE 1 END, updated_at DESC, job_id DESC LIMIT 50",
 			array_merge( [ strtolower( $session['tenant_id'] ), $session['owner'], $cutoff ], $types )
@@ -204,8 +211,8 @@ final class Jobs {
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Não foi possível consultar os relatórios da sessão.' );
 		}
-		return array_map( static function ( array $row ): array {
-			return self::public_view( $row ) + [ 'updatedAt' => str_replace( ' ', 'T', $row['updated_at'] ) . 'Z' ];
+		return array_map( static function ( array $row ) use ( $session ): array {
+			return self::public_view( $row, $session ) + [ 'updatedAt' => str_replace( ' ', 'T', $row['updated_at'] ) . 'Z' ];
 		}, $rows );
 	}
 
@@ -273,7 +280,7 @@ final class Jobs {
 				$view['message'] = 'A ação perdeu a conexão com o portal. Confira o estado no Microsoft 365 antes de executá-la novamente.';
 				return $view;
 			}
-			return self::public_view( $row ) + ( 'running' === $row['status'] ? [ 'retryAfter' => 2 ] : [] );
+			return self::public_view( $row, $session ) + ( 'running' === $row['status'] ? [ 'retryAfter' => 2 ] : [] );
 		}
 
 		$box = self::open( $row['state'], $session['data_key'] );
@@ -326,10 +333,11 @@ final class Jobs {
 				$attempts   = $progressed ? 1 : 1 + (int) ( $state['_read_retries'] ?? 0 );
 				$limit      = 'throttled' === $reason ? self::MAX_REPORT_RETRIES : 3;
 				if ( $retry >= self::TTL || $attempts > $limit ) {
-					throw new \RuntimeException(
+					throw new Graph_Exception(
 						'budget' === $reason
 							? 'A consulta não avançou dentro do tempo de processamento disponível nesta hospedagem.'
-							: 'O Microsoft Graph não respondeu após várias tentativas. Gere o relatório novamente mais tarde.'
+							: 'O Microsoft Graph não respondeu após várias tentativas. Gere o relatório novamente mais tarde.',
+						'throttled' === $reason ? 429 : 503, 'budget' === $reason ? 'host_budget' : 'read_retries_exhausted'
 					);
 				}
 				$retry = max( $retry, 'budget' === $reason ? 1 : min( 30, 2 ** min( 5, $attempts ) ) );
@@ -352,6 +360,7 @@ final class Jobs {
 						'generated_at' => gmdate( 'c' ),
 						'params'       => $params,
 						'warnings'     => array_values( array_unique( $state['_warnings'] ?? [] ) ),
+						'issues'       => array_values( $state['_issues'] ?? [] ),
 						'stored'       => false,
 					]
 				);
@@ -402,7 +411,7 @@ final class Jobs {
 		if ( ! $row ) {
 			return [ 'job_id' => $job_id, 'status' => 'error', 'progress' => 0, 'total' => 0, 'message' => 'Job expirado.' ];
 		}
-		$view = self::public_view( $row );
+		$view = self::public_view( $row, $session );
 		if ( $retry > 0 && 'pending' === $view['status'] ) {
 			$view['retryAfter'] = $retry; // the browser waits before polling again
 		}
@@ -411,12 +420,14 @@ final class Jobs {
 
 	private static function fail( string $job_id, array $row, array $session, \Throwable $e ): void {
 		global $wpdb;
+		$diagnostic = $e instanceof Graph_Exception && isset( self::registry()[ $row['job_type'] ] )
+			? self::seal( [ 'failure' => $e->report_issue() ], $session['data_key'] ) : null;
 		$wpdb->update(
 			Installer::table( 'jobs' ),
 			[
 				'status'     => 'error',
 				'message'    => mb_substr( Privacy::mask_emails( $e->getMessage() ), 0, 500 ),
-				'state'      => null,
+				'state'      => $diagnostic,
 				'updated_at' => gmdate( 'Y-m-d H:i:s' ),
 			],
 			[ 'job_id' => $job_id ]

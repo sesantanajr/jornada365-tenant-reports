@@ -51,14 +51,14 @@ final class Usage extends Report_Base {
 		try {
 			return $this->graph->get_report_csv( '/v1.0/reports/' . $fn, $columns );
 		} catch ( Graph_Exception $e ) {
-			if ( $e->is_forbidden() ) {
+			if ( ! $teams && $e->is_forbidden() ) {
 				throw new Graph_Exception( 'Relatórios de uso indisponíveis: ' . $e->getMessage() . ' (requer Reports.Read.All).', $e->getCode(), $e->graph_code() );
 			}
 			if ( ! $teams || 'j365_token' === $e->graph_code() ) {
 				throw $e; // the main report is the report: an outage must fail visibly, never finish as an empty list
 			}
 			// Teams detail only adds message/meeting/call counts; the rest of the report stays valid (warning shown).
-			$this->warn( $state, preg_replace( '/\(.*$/', '', $fn ) . ': ' . $e->getMessage() );
+			$this->optional_error( $state, 'Detalhes de atividade do Teams indisponíveis', $e );
 			return [];
 		}
 	}

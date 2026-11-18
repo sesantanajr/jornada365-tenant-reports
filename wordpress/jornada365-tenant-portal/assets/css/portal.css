@@ -7,6 +7,17 @@
 .score-days { display: flex; align-items: stretch; gap: .4rem; overflow-x: auto; padding: .45rem 0; }
 .score-day { flex: 1 0 2.6rem; display: grid; justify-items: center; gap: .35rem; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
 .score-day strong { color: var(--text); }
+.score-controls { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; margin-bottom: .8rem; }
+.score-controls > label, .score-archive label { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; font-weight: 600; }
+.score-controls select { width: auto; }
+.score-archive { max-width: 100%; margin-block: .45rem; }
+.score-archive summary { cursor: pointer; font-weight: 650; color: var(--accent); }
+.score-archive input { max-width: 100%; }
+.score-archive .actions { flex-wrap: wrap; }
+.score-months .score-day { flex-basis: 4.3rem; }
+.score-months .missing .score-track { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line) 5px 7px); }
+.score-coverage { margin-block: .55rem 1.2rem; }
+.rp[data-report="identityscore"] .ring-txt b { font-size: clamp(16px, 1.42vw, 22px); }
 .score-track { display: flex; align-items: flex-end; height: 5rem; width: clamp(12px, 2.5vw, 25px); background: var(--line); border-radius: 4px; overflow: hidden; }
 .score-track i { width: 100%; background: var(--grad); border-radius: 4px 4px 0 0; }
 
@@ -507,6 +518,11 @@ code { font-family: var(--f-mono); font-size: .9em; }
 .app-header { position: sticky; top: 12px; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--sh-1); }
 .tenant-block { flex: 1 1 auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .tenant-txt { min-width: 0; }
+.tenant-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tenant-avatar.has-logo { padding: 3px; border: 1px solid var(--line); background: #fff; box-shadow: none; }
+.tenant-avatar.dark-logo { background: #142334; }
+.tenant-avatar.wide-logo { width: clamp(70px, 8vw, 112px); }
+.tenant-avatar img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .tenant-avatar { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border-radius: 14px; color: #fff; background: var(--grad-btn); font: 800 16px var(--f-display); box-shadow: 0 10px 22px -12px rgba(0, 104, 184, .9); }
 .tenant-name { font: 800 17px var(--f-display); letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tenant-meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1348,19 +1364,39 @@ pre.code { margin: 10px 0; max-height: 46vh; overflow: auto; padding: 14px 16px;
 
 .report-activity { padding: clamp(16px, 3vw, 30px); }
 .report-activity .panel-head { padding: 0; }
-.report-activity h3 { margin-top: 1.5rem; }
+.activity-launch { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; padding: 1rem; border-radius: 12px; background: var(--surface-2); }
+.activity-launch label { display: grid; gap: .35rem; width: min(100%, 24rem); font-weight: 650; }
+.activity-launch .j365-input { min-width: 0; width: 100%; }
+.activity-section { margin-top: 1.4rem; }
+.activity-section h3 { display: flex; align-items: center; gap: .55rem; margin: 0 0 .25rem; }
+.activity-section > p { margin: .25rem 0 .5rem; }
+.activity-count { padding: .1em .55em; border: 1px solid var(--line); border-radius: 99px; color: var(--text-2); font: 650 .8rem var(--f-ui); font-variant-numeric: tabular-nums; }
+.activity-section .activity-empty { margin-top: .65rem; padding: .7rem .85rem; border-inline-start: 3px solid var(--line-2); background: var(--surface-2); color: var(--text-2); }
+.activity-section [role="status"]:empty, .activity-section [hidden] { display: none; }
 .report-jobs { list-style: none; margin: 0; padding: 0; }
 .report-jobs li { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem 1rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
 .report-jobs .job-info { flex: 1 1 18rem; min-width: 0; overflow-wrap: anywhere; }
 .report-jobs small, .report-jobs .job-message { display: block; }
 .report-activity .job-controls { display: flex; flex-wrap: wrap; gap: .4rem; }
 .report-activity button[hidden] { display: none; }
+.report-notice { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.report-notice > strong { display: block; font-weight: 700; }
+.report-notice p, .report-notice ul { margin: .4rem 0; }
+.report-notice ul { padding-inline-start: 1.25rem; }
+.report-notice a, .report-notice summary { text-underline-offset: .18em; }
+.report-notice a { color: var(--accent); }
+.report-notice details { margin-top: .5rem; font-size: .88em; }
+.report-notice details p { font-family: var(--f-mono, monospace); }
+.report-partial > ul { padding-inline-start: 1.25rem; }
+.report-partial > ul > li + li { margin-top: .75rem; }
 
 .side-nav { mask-image: none; -webkit-mask-image: none; }
 .kpi { min-width: 0; margin-bottom: 12px; }
 .kpi .l { align-items: flex-start; font-size: 13px; }
 .kpi .v, .kpi-of { min-width: 0; overflow-wrap: anywhere; }
 .kpi .kdot { margin-top: .36em; }
+.kpi.unavailable .v { color: var(--muted); }
+.kpi.unavailable .kdot { background: var(--muted); box-shadow: none; }
 /* The tallest label, value and optional note set the three tracks of each card row.
    Adjacent overview groups use the same tracks when there is room for all of them. */
 @supports (grid-template-rows: subgrid) {
@@ -1398,8 +1434,9 @@ pre.code { margin: 10px 0; max-height: 46vh; overflow: auto; padding: 14px 16px;
 .dt .dt-drill:hover { background: var(--accent-soft); text-decoration-color: currentColor; }
 .dt .dt-drill.has-failures { color: var(--danger); }
 [data-report="managed_apps"] .tablewrap table { table-layout: fixed; min-width: 42rem; }
-[data-report="managed_apps"] .tablewrap th:first-child { width: 25%; }
-[data-report="managed_apps"] .tablewrap th:nth-child(2) { width: 15%; }
+[data-report="managed_apps"] .tablewrap th:first-child { width: clamp(5rem, calc(var(--app-table-viewport, 100cqi) * .40), 15rem); }
+[data-report="managed_apps"] .tablewrap th:nth-child(2) { width: clamp(6rem, calc(var(--app-table-viewport, 100cqi) * .54), 8.5rem); }
+[data-report="managed_apps"] .dt-drill { white-space: normal; overflow-wrap: anywhere; overflow: visible; }
 [data-report="managed_apps"] .tablewrap td { padding: 4px 8px; }
 [data-report="managed_apps"] .dt-sort { padding: 9px 8px; gap: 4px; white-space: normal; }
 [data-report="managed_apps"] .tablewrap th .arrow { margin: 0; }
@@ -1424,15 +1461,14 @@ pre.code { margin: 10px 0; max-height: 46vh; overflow: auto; padding: 14px 16px;
   .dt .tb-actions { padding-inline-start: 5px; }
   .dt .tb-actions .btn { height: 34px; }
   .dt .chip { min-height: 34px; }
-  [data-report="managed_apps"] .tablewrap th:first-child { width: clamp(6rem, 41cqi, 12rem); }
-  [data-report="managed_apps"] .tablewrap th:nth-child(2) { width: 8.5rem; }
 }
 @media (max-width: 480px) {
   .app-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
   .tenant-block { display: contents; }
   .tenant-block .menu-toggle { grid-column: 1; grid-row: 1; justify-self: start; }
-  .tenant-avatar { display: none; }
-  .tenant-txt { grid-column: 1 / -1; grid-row: 2; }
+  .tenant-identity { grid-column: 1 / -1; grid-row: 2; gap: 8px; }
+  .tenant-avatar { width: 30px; height: 30px; border-radius: 8px; font-size: 12px; }
+  .tenant-avatar.wide-logo { width: 62px; }
   .tenant-name { font-size: 15px; }
   .head-tools { grid-column: 2; grid-row: 1; gap: 5px; }
 }

@@ -507,18 +507,12 @@ final class Graph_Client {
 
 	private function humanize( int $status, string $code, string $message, string $path ): string {
 		if ( 403 === $status ) {
-			return Settings::per_tenant()
-				? sprintf( 'O Microsoft Graph negou o acesso a "%s" (%s): a sua conta não tem uma função com acesso a este dado, o aplicativo do seu tenant não tem a permissão ou o recurso não está licenciado.', $this->short_path( $path ), $code )
-				: sprintf( 'O Microsoft Graph negou o acesso a "%s" (%s): falta a permissão do aplicativo neste tenant (aprovação do administrador) ou o recurso não está licenciado.', $this->short_path( $path ), $code );
+			return sprintf( 'Microsoft Graph — HTTP 403 (%s).', $code );
 		}
 		if ( 404 === $status && str_contains( $path, 'deviceManagement' ) ) {
-			return 'Intune não está provisionado ou licenciado neste tenant.';
+			return sprintf( 'Microsoft Intune — HTTP 404 (%s).', $code );
 		}
 		return sprintf( 'Graph %d %s: %s', $status, $code, mb_substr( $message, 0, 300 ) );
 	}
 
-	private function short_path( string $path ): string {
-		$p = preg_replace( '#^https://graph\.microsoft\.com/(v1\.0|beta)/#', '', $path );
-		return mb_substr( (string) preg_replace( '/\?.*$/', '', $p ), 0, 80 );
-	}
 }

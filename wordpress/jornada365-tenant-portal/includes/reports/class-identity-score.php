@@ -25,7 +25,9 @@ final class Identity_Score extends Report_Base {
 			}
 			return [ 'state' => $state, 'progress' => $done ? 1 : 0, 'total' => 2, 'done' => false, 'message' => 'Consultando o histórico do Identity Score…' ];
 		}
-		$url = '/beta/directory/recommendations?$filter=category%20eq%20%27identitySecureScore%27&$select=displayName,status,priority,currentScore,maxScore,lastCheckedDateTime';
+		// Beta deployments can reject an explicit $select on inherited optional fields.
+		// Accept the service's default projection and retain only the fields used in this report.
+		$url = '/beta/directory/recommendations?$filter=category%20eq%20%27identitySecureScore%27';
 		try {
 			$done = $this->fetch_collection( $state, 'recommendations', $url, $deadline, [ 'Prefer' => 'include-unknown-enum-members' ], static function ( $item ) {
 				$current = is_numeric( $item['currentScore'] ?? null ) ? (float) $item['currentScore'] : null;
@@ -35,10 +37,12 @@ final class Identity_Score extends Report_Base {
 					'priority' => (string) ( $item['priority'] ?? '' ), 'current' => $current, 'max' => $max,
 					'gap' => null !== $current && null !== $max ? max( 0, $max - $current ) : null,
 					'checked' => (string) ( $item['lastCheckedDateTime'] ?? '' ),
+					'modified' => (string) ( $item['lastModifiedDateTime'] ?? '' ),
 				];
 			} );
 		} catch ( Graph_Exception $error ) {
 			$this->optional_error( $state, 'Recomendações de identidade indisponíveis', $error );
+			$state['recommendations_partial'] = true;
 			$done = true;
 		}
 		return [ 'state' => $state, 'progress' => $done ? 2 : 1, 'total' => 2, 'done' => $done, 'message' => 'Consultando recomendações de identidade…' ];
@@ -51,16 +55,42 @@ final class Identity_Score extends Report_Base {
 			'date'    => (string) ( $day['createDateTime'] ?? '' ),
 			'current' => $current,
 			'max'     => $max,
-			'percent' => null !== $current && $max > 0 ? round( 100 * $current / $max, 1 ) : null,
+			'percent' => null !== $current && $current >= 0 && $max > 0 && $current <= $max ? 100 * $current / $max : null,
 		];
 	}
 
 	public function finalize( array $state, array $params ): array {
-		$history = array_values( array_filter( $state['history'] ?? [], static fn( $day ) => '' !== $day['date'] ) );
+		// Normalize offsets before ordering. API rows occasionally arrive across UTC day/month boundaries.
+		$history = [];
+		foreach ( $state['history'] ?? [] as $day ) {
+			$date = (string) ( $day['date'] ?? '' );
+			if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/D', $date ) ) {
+				continue;
+			}
+			try {
+				$utc = new \DateTimeZone( 'UTC' );
+				$instant = new \DateTimeImmutable( $date, $utc );
+				$issues = \DateTimeImmutable::getLastErrors();
+				if ( $issues && ( $issues['warning_count'] || $issues['error_count'] ) ) {
+					continue;
+				}
+				$day['date'] = $instant->setTimezone( $utc )->format( 'Y-m-d\TH:i:s.v\Z' );
+			} catch ( \Exception $error ) {
+				continue;
+			}
+			$history[] = self::score_day( [ 'createDateTime' => $day['date'], 'tenantScore' => $day['current'], 'tenantMaxScore' => $day['max'] ] );
+		}
 		usort( $history, static fn( $a, $b ) => strcmp( $b['date'], $a['date'] ) );
+		$latest = [ 'date' => '', 'current' => null, 'max' => null, 'percent' => null ];
+		foreach ( $history as $day ) {
+			if ( null !== $day['percent'] ) {
+				$latest = $day;
+				break;
+			}
+		}
 		$rows = $state['recommendations'] ?? [];
 		usort( $rows, static fn( $a, $b ) => ( $b['gap'] ?? -1 ) <=> ( $a['gap'] ?? -1 ) );
-		return [ 'summary' => $history[0] ?? [ 'date' => '', 'current' => null, 'max' => null, 'percent' => null ],
-			'history' => $history, 'rows' => $rows, '_meta' => [ 'rows' => count( $rows ) ] ];
+		return [ 'summary' => $latest, 'history' => $history, 'rows' => $rows,
+			'_meta' => [ 'rows' => count( $rows ), 'recommendationsPartial' => ! empty( $state['recommendations_partial'] ) ] ];
 	}
 }

@@ -41,7 +41,7 @@
     { icon: 'shield_checkmark', title: 'Acesso Condicional', text: 'Políticas com nomes resolvidos, exclusões e lacunas Zero Trust.', tag: 'Zero Trust' },
     { icon: 'people_list', title: 'Grupos', text: 'Sincronizados do AD, cloud-only, aninhados, vazios e sem dono.', tag: 'Diretório' },
     { icon: 'lock_shield', title: 'Acessos privilegiados', text: 'Atribuições permanentes vs. elegíveis (PIM) e admins sem MFA.', tag: 'PIM' },
-    { icon: 'warning', title: 'Risco', text: 'Usuários e detecções de risco do Identity Protection.', tag: 'P2' },
+    { icon: 'warning', title: 'Risco', text: 'Usuários e detecções de risco do Identity Protection.', tag: 'P1 / P2' },
     { icon: 'certificate', title: 'Apps & consentimentos', text: 'Segredos e certificados expirando e consentimentos arriscados.', tag: 'Apps' },
     { icon: 'gauge', title: 'Secure Score', text: 'Pontuação, tendência e recomendações com maior ganho.', tag: 'Defender' },
     { icon: 'coin_multiple', title: 'Licenças & custo', text: 'Licenças ociosas em contas desabilitadas, inativas e convidados.', tag: 'Custo' },

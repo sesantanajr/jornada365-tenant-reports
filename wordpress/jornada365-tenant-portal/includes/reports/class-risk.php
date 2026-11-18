@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Identity Protection: risky users and recent risk detections (Entra ID P2).
+ * Identity Protection: risky users (P2) and recent risk detections (P1/P2).
  */
 final class Risk extends Report_Base {
 
@@ -29,10 +29,13 @@ final class Risk extends Report_Base {
 					'updated'     => (string) ( $u['riskLastUpdatedDateTime'] ?? '' ),
 				] );
 			} catch ( Graph_Exception $e ) {
-				if ( $e->is_forbidden() || $e->is_license_gate() || 400 === $e->getCode() ) {
-					throw new Graph_Exception( 'Identity Protection indisponível: ' . $e->getMessage() . ' (requer Entra ID P2 e IdentityRiskyUser.Read.All).', $e->getCode(), $e->graph_code() );
+				if ( ! $e->is_forbidden() && 'Authentication_RequestFromNonPremiumTenantOrB2CTenant' !== $e->graph_code() ) {
+					throw $e;
 				}
-				throw $e;
+				// Risk detections have separate licensing and consent and may still be readable.
+				$this->optional_error( $state, 'Usuários em risco indisponíveis', $e );
+				$state['usersIssue'] = $e->report_issue();
+				$done = true;
 			}
 			if ( ! $done ) {
 				return [ 'state' => $state, 'progress' => count( $state['users'] ), 'total' => 0, 'done' => false, 'message' => sprintf( '%d usuários de risco…', count( $state['users'] ) ) ];
@@ -54,7 +57,11 @@ final class Risk extends Report_Base {
 				] );
 			} catch ( Graph_Exception $e ) {
 				$this->optional_error( $state, 'Detecções de risco indisponíveis (IdentityRiskEvent.Read.All)', $e );
-				$state['detections'] = [];
+				$state['detectionsIncomplete'] = true;
+				if ( ! empty( $state['usersIssue'] ) && ! $state['users'] && ! $state['detections'] ) {
+					$issue = $state['usersIssue'];
+					throw new Graph_Exception( 'O Microsoft Graph não disponibilizou as consultas do Identity Protection.', $issue['status'], $issue['code'] );
+				}
 				$done                = true;
 			}
 			if ( ! $done ) {
@@ -69,13 +76,18 @@ final class Risk extends Report_Base {
 
 	public function finalize( array $state, array $params ): array {
 		$users   = $state['users'] ?? [];
-		$summary = [ 'total' => count( $users ), 'high' => 0, 'medium' => 0, 'low' => 0, 'atRisk' => 0, 'confirmedCompromised' => 0, 'detections' => count( $state['detections'] ?? [] ), 'byType' => [] ];
+		$summary = [ 'total' => count( $users ), 'high' => 0, 'medium' => 0, 'low' => 0, 'atRisk' => 0, 'confirmedCompromised' => 0, 'detections' => empty( $state['detectionsIncomplete'] ) ? count( $state['detections'] ?? [] ) : null, 'byType' => [] ];
 		foreach ( $users as $u ) {
 			$summary[ $u['level'] ] = ( $summary[ $u['level'] ] ?? 0 ) + 1;
 			$summary['atRisk']               += 'atRisk' === $u['state'] ? 1 : 0;
 			$summary['confirmedCompromised'] += 'confirmedCompromised' === $u['state'] ? 1 : 0;
 		}
 		$detections = $state['detections'] ?? [];
+		if ( ! empty( $state['usersIssue'] ) ) {
+			foreach ( [ 'total', 'high', 'medium', 'low', 'atRisk', 'confirmedCompromised' ] as $metric ) {
+				$summary[ $metric ] = null;
+			}
+		}
 		usort( $detections, fn( $a, $b ) => strcmp( $b['detected'], $a['detected'] ) ); // newest first ($orderby isn't documented on v1.0)
 		foreach ( $detections as $d ) {
 			$summary['byType'][ $d['type'] ] = ( $summary['byType'][ $d['type'] ] ?? 0 ) + 1;

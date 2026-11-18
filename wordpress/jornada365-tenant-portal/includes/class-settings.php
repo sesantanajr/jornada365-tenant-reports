@@ -148,7 +148,7 @@ final class Settings {
 		'DeviceManagementManagedDevices.Read.All' => [ 'apps', 'app_devices' ],
 		'DeviceManagementApps.Read.All'           => [ 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures' ],
 		'RoleManagement.Read.All'                 => [ 'privileged' ],
-		'IdentityRiskyUser.Read.All'              => [ 'risk' ],
+		'IdentityRiskyUser.Read.All'              => [],
 		'IdentityRiskEvent.Read.All'              => [],
 		'Application.Read.All'                    => [ 'appsec' ],
 		'SecurityEvents.Read.All'                 => [ 'securescore' ],
@@ -167,6 +167,9 @@ final class Settings {
 		$out = [];
 		foreach ( $missing as $p ) {
 			$out = array_merge( $out, self::PERMISSION_REPORTS[ $p ] ?? [] );
+		}
+		if ( in_array( 'IdentityRiskyUser.Read.All', $missing, true ) && in_array( 'IdentityRiskEvent.Read.All', $missing, true ) ) {
+			$out[] = 'risk';
 		}
 		return array_values( array_unique( $out ) );
 	}
