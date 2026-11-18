@@ -15,7 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Validate plugin metadata and build the installer
-        run: python3 scripts/package.py
+        run: |
+          archive=$(python3 scripts/package.py)
+          slug=jornada365-tenant-portal
+          unzip -tq "$archive" "$slug/LICENSE" \
+            "$slug/assets/img/overview-glass.webp" \
+            "$slug/assets/img/portal-share.jpg"
+          printf 'Verified installer `%s` including the license, Overview banner and public sharing image.\n' "${archive##*/}" >> "$GITHUB_STEP_SUMMARY"
 
   release:
     needs: package

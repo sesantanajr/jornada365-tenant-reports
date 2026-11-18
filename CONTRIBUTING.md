@@ -4,6 +4,8 @@ To report an issue, include the WordPress, PHP and plugin versions, the report n
 
 Work in a branch of your fork. The plugin source is in `wordpress/jornada365-tenant-portal/`. To build an installable archive, run `python scripts/package.py` at the repository root. Install the ZIP from `dist/` on a staging WordPress site. In your pull request, describe the change and how you verified it. Preserve third-party notices when adding assets. [Project license](LICENSE)
 
+For changes to the 2.0 Overview, check the banner and paid-seat indicator on desktop and mobile. Open the report links from the charts and export the executive workbook. If the layout changes, refresh the English and Brazilian Portuguese screenshots in `docs/assets/` with fictional tenant data.
+
 To publish a new version, update the plugin version header, the runtime version constant, the WordPress readme's stable tag and its changelog. On the default branch, GitHub Actions checks the archive and publishes the versioned release.
 
 ## Português do Brasil
@@ -23,6 +25,8 @@ python3 scripts/package.py
 
 3. Instale o ZIP de `dist/` pelo painel do WordPress em um ambiente de homologação. Para mudanças de interface, verifique o relatório em tela pequena e em tela grande. Para mudanças no Microsoft Graph, confira o resultado com dados conhecidos de um tenant de homologação.
 4. No pull request, explique o problema observado, a mudança e como você verificou o resultado. Inclua uma captura com dados de exemplo se houver mudança visual.
+
+Ao alterar a Visão geral da 2.0, confira o banner e o indicador de licenças pagas em um computador e em um celular. Abra os relatórios pelos gráficos e exporte o Excel executivo. Se o layout mudar, atualize as capturas em português e inglês de `docs/assets/` usando dados fictícios.
 
 O código do projeto é distribuído sob a GPL-2.0-or-later. Ao incluir recursos de terceiros, preserve os créditos e a licença correspondente. [Licença do projeto](LICENSE)
 
