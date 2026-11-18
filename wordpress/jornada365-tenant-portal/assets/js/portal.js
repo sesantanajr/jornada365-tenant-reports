@@ -68,7 +68,7 @@
         (seconds) => onProgress({ message: t('Nova tentativa em {n} s…', { n: seconds }) }),
         deadline, requestId ? 3 : 0
       );
-      return followJob(start?.job, onProgress, opts);
+      return followReadJob(start?.job, onProgress, opts);
     }, new Error(t('O relatório excedeu o tempo de espera. Gere novamente para tentar.')));
   }
 
@@ -99,6 +99,34 @@
     const result = await api('jobs/' + id + '/result', opts);
     if (!result || typeof result !== 'object') throw new Error(t('O servidor devolveu um resultado inválido para o relatório.'));
     return result;
+  }
+
+  // A report view and the activity page can wait for the same one-time result in this tab.
+  // Actions use followJob directly and never enter this registry.
+  const readJobs = new Map();
+  function followReadJob(job, onProgress, opts) {
+    const id = job?.job_id;
+    if (!id || job.type?.startsWith('act_')) throw new Error(t('Relatório indisponível nesta sessão.'));
+    let task = readJobs.get(id);
+    if (!task) {
+      task = { controller: new AbortController(), listeners: new Set(), last: job };
+      readJobs.set(id, task);
+      task.promise = followJob(job, (update) => {
+        task.last = update;
+        for (const listener of task.listeners) listener(update);
+      }, { ...opts, reportOnly: true, signal: task.controller.signal }).finally(() => {
+        if (readJobs.get(id) === task) readJobs.delete(id);
+      });
+    }
+    task.listeners.add(onProgress);
+    onProgress(task.last);
+    return waitFor(task.promise, opts.signal).finally(() => {
+      task.listeners.delete(onProgress);
+      if (!task.listeners.size && opts.signal.aborted && readJobs.get(id) === task) {
+        readJobs.delete(id);
+        task.controller.abort(opts.signal.reason);
+      }
+    });
   }
 
   /* ----------------------------------------------------------- icons */
@@ -162,23 +190,26 @@
         const s = document.createElement('script');
         s.src = (CFG.assetsUrl || '') + 'js/xlsx.js?ver=' + encodeURIComponent(CFG.assetVersion || CFG.version || '');
         s.onload = () => (window.J365Xlsx ? resolve(window.J365Xlsx) : reject(new Error(t('Não foi possível carregar o gerador de Excel.'))));
-        s.onerror = () => { xlsxEngine = null; reject(new Error(t('Não foi possível carregar o gerador de Excel.'))); };
+        s.onerror = () => reject(new Error(t('Não foi possível carregar o gerador de Excel.')));
         document.head.appendChild(s);
-      });
+      }).catch((error) => { xlsxEngine = null; throw error; });
     }
     return xlsxEngine;
   }
   const textOf = (v) => (v instanceof Node ? v.textContent.trim() : t(String(v ?? '')));
+  // Directory names and identifiers belong to the tenant, even when they match a UI translation.
+  const verbatimColumn = (key) => /^(?:id|upn|mail|name|displayName|company|department|jobTitle|domain|owner|ownerUpn|user|primaryUser|publisher|manufacturer|model|serial|url|ip|notes|app_name|.*Id)$/.test(key || '');
   /** Value as it goes to a cell: numbers stay numbers, ISO dates become Excel dates, the rest translated text. */
-  function cellOf(v) {
+  function cellOf(v, key) {
     if (v === null || v === undefined || v === '' || v === '—') return { v: null, k: '' };
     if (typeof v === 'number') return Number.isFinite(v) ? { v, k: 'n' } : { v: null, k: '' };
     if (typeof v === 'boolean') return { v: t(v ? 'Sim' : 'Não'), k: 's' };
-    if (Array.isArray(v)) return { v: v.map((x) => t(String(x))).join('; '), k: 's' };
+    if (Array.isArray(v)) return { v: v.map((x) => verbatimColumn(key) ? String(x) : t(String(x))).join('; '), k: 's' };
     if (v instanceof Node) return { v: v.textContent.trim() || null, k: 's' };
     const str = String(v);
+    if (verbatimColumn(key)) return { v: str, k: 's' };
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) { const d = new Date(str); if (!isNaN(d)) return { v: d, k: 'dt' }; }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) { const d = new Date(str + 'T12:00:00'); if (!isNaN(d)) return { v: d, k: 'd' }; }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) { const d = new Date(str + 'T00:00:00'); if (!isNaN(d)) return { v: d, k: 'd' }; }
     return { v: t(str), k: 's' };
   }
   const XL = {
@@ -208,9 +239,11 @@
     if (logoBytes) return logoBytes;
     for (const u of [CFG.logo && CFG.logo.light, CFG.iconUrl].filter((x) => typeof x === 'string' && x)) {
       try {
-        const r = await fetch(u, { credentials: 'same-origin', cache: 'force-cache' });
-        if (!r.ok) continue;
-        let b = new Uint8Array(await r.arrayBuffer());
+        let b = await withDeadline(4000, null, async (signal) => {
+          const r = await fetch(u, { credentials: 'same-origin', cache: 'force-cache', signal });
+          return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+        }, new Error('Logo timeout'));
+        if (!b) continue;
         if (b.length <= 24 || b.length >= 3e6) continue;
         if (window.J365Xlsx && !window.J365Xlsx.imageInfo(b)) b = await asPng(b);
         if (b) { logoBytes = b; return b; }
@@ -273,12 +306,13 @@
     const kinds = cols.map(() => ({ n: 0, dt: 0, d: 0, s: 0, int: true, len: [] }));
     const data = rows.map((r) => cols.map((c, i) => {
       const raw0 = c.export ? c.export(r) : (c.value ? c.value(r) : r[c.key]);
-      const cv = cellOf(raw0);
+      const cv = cellOf(raw0, c.key);
       const k = kinds[i];
       if (cv.k) k[cv.k]++;
       if (cv.k === 'n' && !Number.isInteger(cv.v)) k.int = false;
       if (k.len.length < 400 && cv.v !== null) k.len.push(cv.k === 's' ? String(cv.v).length : 12);
-      return cv.v;
+      // Report payloads express percentages on a 0–100 scale. Excel percentages use 0–1.
+      return cv.k === 'n' && heads[i].includes('%') ? cv.v / 100 : cv.v;
     }));
     // Badge colour per exported value, read from the same render function the table uses on screen.
     const tones = cols.map((c, i) => {
@@ -290,7 +324,7 @@
         const b = el instanceof Element ? (el.classList.contains('badge') ? el : el.querySelector('.badge')) : null;
         if (!b) continue;
         const tone = toneOf(b.className);
-        const val = cellOf(c.export ? c.export(r) : (c.value ? c.value(r) : r[c.key])).v;
+        const val = cellOf(c.export ? c.export(r) : (c.value ? c.value(r) : r[c.key]), c.key).v;
         if (tone && typeof val === 'string' && val.length <= 255 && !map.has(val)) map.set(val, tone);
         if (map.size > 12) break;
       }
@@ -300,7 +334,7 @@
       const k = kinds[i], label = heads[i];
       if (k.dt && !k.s && !k.n) return { fmt: dateFmt(true), w: 16 };
       if (k.d && !k.s && !k.n) return { fmt: dateFmt(false), w: 12 };
-      if (k.n && !k.s) return /%/.test(label) ? { fmt: '0"%"', w: 10, pct: true } : { fmt: k.int ? '#,##0' : '#,##0.00', w: 12 };
+      if (k.n && !k.s) return /%/.test(label) ? { fmt: '0.##%', w: 10, pct: true } : { fmt: k.int ? '#,##0' : '#,##0.00', w: 12 };
       return { fmt: '', w: 0 };
     });
     const widths = cols.map((c, i) => {
@@ -500,7 +534,6 @@
     const cover = exec ? gridSheet(t('Capa'), { selected: true, tab: XL.deep, portrait: true, footer: footer(APP) }) : null;
     const sum = gridSheet(t(multi ? 'Resumo executivo' : 'Resumo'), { selected: !exec, tab: XL.navy, footer: footer(APP + ' — ' + title) });
     let r = header(sum, 1, COLS, multi ? t('Resumo executivo') : title, multi ? org : subtitle);
-    const dataSheets = [];
     sections.forEach((sec) => { (sec.tables || []).forEach((tb, i) => { tb.sheetName = multi ? (tb.sheet || sec.short || sec.title) : (i ? (tb.sheet || tb.title || t('Dados') + ' ' + (i + 1)) : t('Dados')); }); });
 
     for (const sec of sections) {
@@ -524,10 +557,51 @@
       const skip = new Set([...bars.map((b) => String(b.title || '').toLowerCase()), ...bars.filter((b) => b.opts && b.opts.key).map((b) => 'key:' + b.opts.key)]);
       const dists = multi ? bars.slice(0, 2) : [...bars.slice(0, 6), ...(tb ? autoDistributions(tb.rows, tb.columns, skip, Math.max(0, 6 - bars.length)) : [])];
       for (const b of dists) r = distBlock(sum, r, b);
-      if (sec.subtitle) { sum.height(r, 30); sum.set(r, 1, /^\s*(fonte|source|fuente)\s*:/i.test(sec.subtitle) ? sec.subtitle : t('Fonte: {s}', { s: sec.subtitle }), st.note).merge(r, 1, r, COLS); r += 2; }
+      if (sec.subtitle) { sum.height(r, 30); sum.set(r, 1, sec.subtitle, st.note).merge(r, 1, r, COLS); r += 2; }
       if (multi) r++;
     }
     sum.height(r, 28).set(r, 1, t('Arquivo gerado por {s} nesta aba. Os dados de uso da Microsoft podem refletir dias anteriores.', { s: APP }), st.note).merge(r, 1, r, COLS);
+
+    // Keep the full set of observations even when the executive cover only shows a short list.
+    const findings = [];
+    if (exec) {
+      for (const section of sections) {
+        const seen = new Set();
+        function record(kind, value) {
+          const note = noteObj(value);
+          if (!note?.text || seen.has(kind + '\n' + note.text)) return;
+          seen.add(kind + '\n' + note.text);
+          findings.push({ section, kind: t(kind), tone: note.tone || 'info', text: note.text });
+        }
+        for (const note of section.insights || []) record('Observação', note);
+        for (const note of section.alerts || []) record('Aviso da consulta', note);
+        const indicator = section.ring;
+        if (indicator && ['danger', 'warn'].includes(indicator.tone) && Number.isFinite(indicator.pct)) {
+          const caption = indicator.caption ? ' · ' + indicator.caption : '';
+          record('Indicador da área', { tone: indicator.tone, text: fmtPct(indicator.pct) + ' ' + indicator.label + caption });
+        }
+        if (section.error) record('Falha na consulta', { tone: 'danger', text: section.error });
+      }
+      findings.sort((a, b) => (SEVERITY[a.tone] ?? 2) - (SEVERITY[b.tone] ?? 2));
+    }
+    let register = null;
+    if (findings.length) {
+      register = wb.sheet(t('Observações e avisos'), { tab: XL.status.warn, footer: footer(title) });
+      header(register, 0, 4, t('Observações e avisos'), org, false);
+      const heads = ['Área', 'Prioridade', 'Origem', 'Descrição', 'Dados consultados em'].map((s) => t(s));
+      const records = findings.map((f) => [f.section.short || f.section.title, t(TONE_LABEL[f.tone] || 'Informativo'), f.kind, f.text, cellOf(f.section.generatedAt).v]);
+      register.table(5, 0, heads, records, { name: 'ReportFindings', colStyles: [st.link, st.tdB, st.td, st.tdW, wb.xf({ fmt: dateFmt(true) })] });
+      [26, 16, 24, 85, 23].forEach((w, i) => register.width(i, w));
+      findings.forEach((f, i) => {
+        const row = 6 + i;
+        register.height(row, Math.max(27, Math.min(409, 16 * Math.ceil(f.text.length / 75) + 6)));
+        register.link(row, 0, sum.name, records[i][0], f.section.anchor);
+        register.set(row, 1, records[i][1], tag[f.tone] || tag.info);
+      });
+      register.height(4, 22).set(4, 0, cover.name, st.link).link(4, 0, cover.name, cover.name);
+      register.freeze(6, 1).printTitles(5);
+      sum.height(4, 22).set(4, 1, register.name, st.link).merge(4, 1, 4, 5).link(4, 1, register.name, register.name);
+    }
 
     /* ---- data sheets (one per table) */
     for (const sec of sections) {
@@ -537,15 +611,16 @@
         const ws = wb.sheet(tb.sheetName, { tab: XL.sky, zoom: 90, footer: footer(APP + ' — ' + sec.title) });
         tb.sheetName = ws.name;
         const lastC = Math.max(5, m.heads.length - 1);
-        const info = [org, t('Gerado em {s}', { s: fmtDate(when.toISOString()) }), t('{n} linha(s)', { n: num(tb.rows.length) }), tb.note].filter(Boolean).join(' · ');
+        const info = [org, sec.generatedAt && t('Dados consultados em {s}', { s: fmtDate(sec.generatedAt) }), t('{n} linha(s)', { n: num(tb.rows.length) }), tb.note].filter(Boolean).join(' · ');
         header(ws, 0, lastC, sec.title + (tb.title && (sec.tables || []).length > 1 ? ' — ' + tb.title : ''), info, false);
+        ws.height(4, 22).set(4, 0, sum.name, st.link).merge(4, 0, 4, 2).link(4, 0, sum.name, sum.name, sec.anchor);
+        if (cover) ws.set(4, 3, cover.name, st.link).merge(4, 3, 4, 5).link(4, 3, cover.name, cover.name);
         const colStyles = m.fmts.map((f, i) => wb.xf({ fmt: f.fmt || undefined, wrap: m.wraps[i] || undefined, v: 'top', font: { sz: 10 } }));
         const box = ws.table(5, 0, m.heads, m.data, { name: tb.name || sec.title, colStyles });
         m.widths.forEach((w, i) => ws.width(i, w));
         ws.freeze(6, m.heads.length > 3 ? 1 : 0).printTitles(5);
-        m.fmts.forEach((f, i) => { if (f.pct && tb.rows.length) ws.dataBar(box.r1 + 1, i, box.r2, i, 'F08A8A', 0, 100); });
+        m.fmts.forEach((f, i) => { if (f.pct && tb.rows.length) ws.dataBar(box.r1 + 1, i, box.r2, i, 'F08A8A', 0, 1); });
         m.tones.forEach((map, i) => { if (!map || !tb.rows.length) return; for (const [val, tone] of map) ws.whenEquals(box.r1 + 1, i, box.r2, i, val, dxf[tone]); });
-        dataSheets.push(tb);
       }
     }
     for (const sec of sections) if (sec.linkCell) sum.link(sec.linkCell[0], sec.linkCell[1], sec.linkCell[2].sheetName, t('Ver dados'));
@@ -554,6 +629,8 @@
     if (cover) {
       let c = header(cover, 1, COLS, title, subtitle);
       const ok = sections.filter((x) => !x.error);
+      cover.height(4, 22).set(4, 1, t('{a} de {b} seções disponíveis', { a: num(ok.length), b: num(sections.length) }), st.key).merge(4, 1, 4, 6);
+      if (register) cover.set(4, 7, register.name, st.link).merge(4, 7, 4, COLS).link(4, 7, register.name, register.name);
       cover.height(c, 24).set(c, 1, t('Indicadores por área'), st.h2).merge(c, 1, c, COLS);
       for (let k = 2; k <= COLS; k++) cover.set(c, k, null, st.h2);
       c += 2;
@@ -581,15 +658,14 @@
         c += 5;
       }
       // Attention points from every area, most severe first.
-      const pts = [];
-      for (const sec of ok) for (const n of [...(sec.insights || []), ...(sec.alerts || [])].map(noteObj)) if (n && n.text && (n.tone === 'danger' || n.tone === 'warn')) pts.push({ sec, n });
-      pts.sort((a, b) => (SEVERITY[a.n.tone] - SEVERITY[b.n.tone]));
+      const pts = findings.filter((item) => item.tone === 'danger' || item.tone === 'warn');
       c++;
       cover.height(c, 24).set(c, 1, t('Pontos de atenção'), st.h2).merge(c, 1, c, COLS);
       for (let k = 2; k <= COLS; k++) cover.set(c, k, null, st.h2);
       c += 2;
-      if (!pts.length) { cover.set(c, 1, t('Nenhum ponto crítico ou de atenção nas áreas selecionadas.'), st.li).merge(c, 1, c, COLS); c += 2; }
-      for (const { sec, n } of pts.slice(0, 16)) {
+      if (!pts.length) { cover.set(c, 1, t('Nenhum ponto crítico ou de atenção nas seções disponíveis.'), st.li).merge(c, 1, c, COLS); c += 2; }
+      for (const n of pts.slice(0, 16)) {
+        const sec = n.section;
         cover.height(c, Math.max(24, 15 * Math.min(5, Math.ceil(n.text.length / 95)) + 8));
         cover.set(c, 1, t(TONE_LABEL[n.tone]), tag[n.tone]);
         cover.set(c, 2, sec.short || sec.title, st.tdB).merge(c, 2, c, 3); cover.set(c, 3, null, st.tdB);
@@ -598,7 +674,7 @@
         cover.link(c, 2, sum.name, sec.short || sec.title, sec.anchor);
         c++;
       }
-      if (pts.length > 16) { cover.set(c, 1, t('E mais {n} ponto(s) no resumo executivo.', { n: num(pts.length - 16) }), st.note).merge(c, 1, c, COLS); c++; }
+      if (pts.length > 16 && register) { cover.set(c, 1, register.name, st.link).merge(c, 1, c, COLS).link(c, 1, register.name, register.name); c++; }
       // Contents.
       c += 2;
       cover.height(c, 24).set(c, 1, t('Conteúdo'), st.h2).merge(c, 1, c, COLS);
@@ -632,7 +708,7 @@
     const facts = [
       ['Relatório', title], ['Organização', ten.name || '—'], ['Domínio', ten.domain || '—'], ['ID do tenant', ten.id || '—'],
       ['Gerado em', fmtDate(when.toISOString())], ['Gerado por', user.upn || '—'], ['Escopo', scope || '—'],
-      ['Planilhas', [...(cover ? [cover.name] : []), sum.name, ...dataSheets.map((x) => x.sheetName), t('Sobre')].join(' · ')],
+      ['Planilhas', wb.sheets.map((s) => s.name).join(' · ')],
       ['Origem dos dados', t('Microsoft Graph, com as permissões de leitura disponíveis ao gerar cada relatório.')],
       ['Privacidade', t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.')],
       ['Filtros', t('Cada planilha de dados é uma tabela do Excel: use os botões de filtro e ordenação no cabeçalho.')],
@@ -646,7 +722,7 @@
   /** What a report panel shows, from the registries (KPIs, distributions, highlights, tables). */
   function harvestPanel(panel) {
     const meta = PANEL_META.get(panel) || { title: (panel.querySelector('h2') || {}).textContent || '' };
-    const mine = (el) => !el.closest('.dlg') && el.closest('.panel[data-report]') === panel;
+    const mine = (el) => el.closest('.panel[data-report]') === panel && el.closest('.dlg') === panel.closest('.dlg');
     const kp = [...panel.querySelectorAll('.kpis')].filter(mine).flatMap((el) => KPI_DATA.get(el) || []);
     // Title of a distribution: the nearest heading before it (its card, or a sibling heading).
     const heading = (el) => {
@@ -658,7 +734,7 @@
       }
       return '';
     };
-    const bars = [...panel.querySelectorAll('ul.bars, .donut')].filter((el) => !el.closest('.dlg')).map((el) => {
+    const bars = [...panel.querySelectorAll('ul.bars, .donut')].filter(mine).map((el) => {
       const d = BAR_DATA.get(el);
       return d ? Object.assign({ title: heading(el) }, d) : null;
     }).filter(Boolean);
@@ -672,9 +748,12 @@
       return parts.join('').replace(/\s+/g, ' ').replace(/\s+([.,;:])/g, '$1').trim();
     };
     const toneIn = (el) => (['danger', 'warn', 'ok', 'info'].find((x) => el.classList.contains(x)) || 'info');
-    const insights = [...panel.querySelectorAll('.insight, .insight-list > li')].filter((el) => !el.closest('.dlg')).map((el) => ({ text: clean(el.querySelector('div:not(.ins-ic):not(.ins-act)') || el), tone: toneIn(el) })).filter((x) => x.text);
-    const alerts = [...panel.querySelectorAll('.alert.warn, .alert.danger')].filter((el) => !el.closest('.dlg') && !el.closest('.gate-foot')).map((el) => ({ text: clean(el), tone: toneIn(el) })).filter((x) => x.text && x.text.length < 600);
-    const tables = [...panel.querySelectorAll('.dt')].filter((el) => !el.closest('.dlg')).map((el) => { const d = TABLE_DATA.get(el); return d ? Object.assign({ title: heading(el) }, d) : null; }).filter(Boolean);
+    const insights = [...panel.querySelectorAll('.insight, .insight-list > li')].filter(mine).map((el) => ({ text: clean(el.querySelector('div:not(.ins-ic):not(.ins-act)') || el), tone: toneIn(el) })).filter((x) => x.text);
+    const alerts = [...panel.querySelectorAll('.alert.warn, .alert.danger')].filter((el) => mine(el) && !el.closest('.gate-foot')).flatMap((el) => {
+      const items = [...el.querySelectorAll(':scope > ul.list > li')];
+      return (items.length ? items : [el]).map((item) => ({ text: clean(item), tone: toneIn(el) }));
+    }).filter((x) => x.text);
+    const tables = [...panel.querySelectorAll('.dt')].filter(mine).map((el) => { const d = TABLE_DATA.get(el); return d ? Object.assign({ title: heading(el) }, d) : null; }).filter(Boolean);
     return Object.assign({}, meta, { kpis: kp, bars, insights, alerts, tables });
   }
 
@@ -713,6 +792,7 @@
         await Promise.allSettled(waits);
         await sleep(60);
         const panels = el.matches('.panel[data-report]') ? [el] : [...el.querySelectorAll('.panel[data-report]')];
+        if (!panels.length) out.push({ title: t(label), error: t('A seção não retornou um relatório.') });
         let ok = false;
         for (const panel of panels) {
           const sec = harvestPanel(panel);
@@ -778,10 +858,26 @@
     if (fmt === 'xlsx') { exportExcel(document.body, rows, columns, name, ''); return; }
     const cols = columns.filter((c) => c.label);
     const headers = cols.map((c) => t(c.xlLabel || c.label));
-    const tr = (v) => (typeof v === 'string' ? t(v) : v);
-    const data = rows.map((r) => cols.map((c) => { const v = c.export ? c.export(r) : (c.value ? c.value(r) : r[c.key]); return Array.isArray(v) ? v.map((x) => tr(String(x))).join('; ') : (v === null || v === undefined ? '' : (typeof v === 'boolean' ? yesNo(v) : tr(v))); }));
-    const csv = [headers, ...data].map((row) => row.map(quoteCsvField).join(';')).join('\r\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const decimalComma = !String(CFG.intl || 'pt-BR').toLowerCase().startsWith('en');
+    const separator = decimalComma ? ';' : ',';
+    const parts = ['\ufeff', headers.map(quoteCsvField).join(separator)];
+    let block = [];
+    for (const row of rows) {
+      const cells = cols.map((c) => {
+        const value = c.export ? c.export(row) : (c.value ? c.value(row) : row[c.key]);
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          const digits = String(value);
+          return '"' + (decimalComma ? digits.replace('.', ',') : digits) + '"';
+        }
+        const label = (v) => verbatimColumn(c.key) ? String(v ?? '') : t(String(v ?? ''));
+        const text = Array.isArray(value) ? value.map(label).join('; ') : typeof value === 'boolean' ? yesNo(value) : (value instanceof Node ? value.textContent : label(value));
+        return quoteCsvField(text);
+      });
+      block.push('\r\n' + cells.join(separator));
+      if (block.length === 1000) { parts.push(block.join('')); block = []; }
+    }
+    if (block.length) parts.push(block.join(''));
+    const blob = new Blob(parts, { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = h('a', { href: url, download: `${name}-${stamp()}.csv` });
     document.body.appendChild(a); a.click(); a.remove();
@@ -1113,7 +1209,7 @@
     });
   }
   const NAV = [
-    { label: 'Geral', items: [['overview', 'Visão geral', 'overview', 'home']] },
+    { label: 'Geral', items: [['overview', 'Visão geral', 'overview', 'home'], ['activity', 'Meus relatórios', null, 'clock']] },
     { label: 'Identidade', items: [['identity', 'Usuários', 'identity', 'users'], ['inactive', 'Contas inativas', 'identity', 'clock'], ['mfa', 'MFA', 'mfa', 'key'], ['guests', 'Convidados', 'guests', 'guest'], ['privileged', 'Acessos privilegiados', 'privileged', 'crown'], ['risk', 'Risco', 'risk', 'pulse']] },
     { label: 'Dispositivos & apps', items: [['devices', 'Dispositivos', 'devices', 'device'], ['apps', 'Aplicativos', 'apps', 'box']] },
     { label: 'Segurança', items: [['ca', 'Acesso Condicional', 'ca', 'shield'], ['authpolicies', 'Políticas de autenticação', 'authpolicies', 'lock'], ['appsec', 'Apps & consentimentos', 'appsec', 'plug'], ['securescore', 'Secure Score', 'securescore', 'gauge']] },
@@ -1430,6 +1526,7 @@
         const warnings = payload._meta?.warnings || [];
         const notice = warnings.length ? h('div', { class: 'alert warn' }, h('strong', null, 'Avisos: '), h('ul', { class: 'list' }, ...warnings.map((w) => h('li', null, w)))) : null;
         body.replaceChildren(...(notice ? [notice, content] : [content]));
+        PANEL_META.set(panel, { ...PANEL_META.get(panel), generatedAt: payload._meta?.generated_at || null });
         lastGenerated = fmtDate(payload._meta?.generated_at);
         status.textContent = t('Gerado em {s}', { s: lastGenerated });
         if (opts.ring) { let spec = null; try { spec = opts.ring(payload); } catch (e) { spec = null; } ctx.setRing(spec); }
@@ -1758,7 +1855,7 @@
     androidAOSPUserOwnedDeviceEnrollment: 'Android AOSP — com usuário', androidAOSPUserlessDeviceEnrollment: 'Android AOSP — sem usuário', unknown: 'Desconhecido',
   };
   const AGENT = { mdm: 'MDM', eas: 'Exchange ActiveSync', easMdm: 'EAS + MDM', intuneClient: 'Agente do Intune (PC)', configurationManagerClient: 'Configuration Manager', configurationManagerClientMdm: 'Configuration Manager + MDM (cogerenciado)', configurationManagerClientMdmEas: 'Configuration Manager + MDM + EAS', jamf: 'Jamf', googleCloudDevicePolicyController: 'Google (Chrome Enterprise)', microsoft365ManagedMdm: 'Microsoft 365 (MDM básico)', msSense: 'Defender for Endpoint (gerenciamento de segurança)', intuneAosp: 'Intune (AOSP)', unknown: 'Desconhecido' };
-  const isoDay = (d) => (d ? fmtDay(d + 'T12:00:00Z') : '—');
+  const isoDay = fmtDay;
   const supportNote = (n) => (n && n.tpl ? t(n.tpl, { a: n.a ? isoDay(n.a) : '', b: n.b ? isoDay(n.b) : '', c: n.c ? isoDay(n.c) : '', os: n.os || '', min: n.min ?? '' }) : '');
   const compliance = (c) => COMPLIANCE[String(c || '').toLowerCase()] || (c ? [c, ''] : null);
   function deviceDetail(r) {
@@ -1902,10 +1999,14 @@
     body.append(devOut);
     const m = modal(r.name, body);
     function loadDevices(ids, label) {
-      devOut.innerHTML = '';
+      devOut.replaceChildren(appDevicesPanel(ids, label));
+    }
+  }
+
+  function appDevicesPanel(ids, label) {
       const own = (x) => OWNERSHIP[String(x.ownership || '').toLowerCase()] || x.ownership || '';
       const cmp = (x) => String(x.compliance || '').toLowerCase();
-      devOut.append(reportPanel('app_devices', { ids, name: label }, t('Dispositivos com {s}', { s: label }), (p) => DataTable({ rows: p.rows, columns: [
+      return reportPanel('app_devices', { ids, name: label }, t('Dispositivos com {s}', { s: label }), (p) => DataTable({ rows: p.rows, columns: [
         { key: 'name', label: 'Dispositivo' }, { key: 'user', label: 'Usuário' }, { key: 'os', label: 'SO' }, { key: 'osVersion', label: 'Versão SO' },
         { key: 'compliance', label: 'Conformidade', render: (x) => { const c = compliance(x.compliance); return c ? badge(c[0], c[1]) : '—'; }, export: (x) => (compliance(x.compliance) || [''])[0] },
         { key: 'lastSync', label: 'Último sync', render: (x) => fmtDate(x.lastSync), export: (x) => x.lastSync },
@@ -1914,8 +2015,7 @@
         { key: 'enrollmentType', label: 'Tipo de registro', exportOnly: true, export: (x) => (x.enrollmentType ? ENROLL[x.enrollmentType] || x.enrollmentType : '') },
       ], filters: [
         { id: 'noncompliant', label: 'Não conformes', fn: (x) => cmp(x) === 'noncompliant' }, { id: 'compliant', label: 'Conformes', fn: (x) => cmp(x) === 'compliant' }, { id: 'personal', label: 'Pessoais', fn: (x) => String(x.ownership || '').toLowerCase() === 'personal' },
-      ], name: `app-${label.replace(/[^a-z0-9]+/gi, '_')}`, sheet: 'Dispositivos com o app', pageSize: 25 }), { icon: 'device' }));
-    }
+      ], name: `app-${label.replace(/[^a-z0-9]+/gi, '_')}`, sheet: 'Dispositivos com o app', pageSize: 25 }), { icon: 'device' });
   }
 
   /* Conditional Access */
@@ -2195,20 +2295,41 @@
   /* App security */
   views.appsec = () => reportPanel('appsec', {}, 'Aplicativos, consentimentos & credenciais', (p) => {
     const s = p.summary, box = h('div');
+    const objectType = (r) => t(({ 'App Registration': 'Registro de aplicativo', 'Service Principal': 'Entidade de serviço' })[r.ownerType] || r.ownerType);
+    const credentialType = (r) => t(({ Secret: 'Segredo', Certificado: 'Certificado' })[r.credType] || r.credType);
+    const expiry = (r) => t(({ 'expirado': 'Expirada', 'expira <30d': 'Expira em até 30 dias', 'expira <90d': 'Expira entre 31 e 90 dias', 'sem validade': 'Validade desconhecida', ok: 'Mais de 90 dias' })[r.status] || r.status);
     box.append(kpis([
       { label: 'Enterprise apps', value: s.enterpriseApps }, { label: 'De terceiros', value: s.thirdParty, cls: 'warn' }, { label: 'Credenciais', value: s.credsTotal }, { label: 'Expiradas', value: s.credsExpired, cls: 'danger' }, { label: 'Expiram <30d', value: s.creds30, cls: 'warn' }, { label: 'Consentimentos', value: s.consents }, { label: 'Consentimentos de risco', value: s.riskyConsents, cls: s.riskyConsents ? 'danger' : 'ok' }, { label: 'Tenant-wide', value: s.tenantWideConsents, cls: 'warn' },
     ]));
     if (s.credsTotal) {
-      const ok = Math.max(0, s.credsTotal - s.credsExpired - s.creds30);
+      const undated = s.credsUndated ?? p.rows.filter((r) => r.daysToExpiry == null).length;
+      const ok = Math.max(0, s.credsTotal - s.credsExpired - s.creds30 - undated);
       box.append(vizRow(
-        vizCard('Credenciais', donut([['Em dia', ok, null, 'ok'], ['Expiram em até 30 dias', s.creds30, null, 'warn'], ['Expiradas', s.credsExpired, null, 'danger']], { centerLabel: t('credenciais'), key: 'status' })),
+        vizCard('Credenciais', donut([['Mais de 30 dias', ok, () => credentials.setFilter('later'), 'ok'], ['Expiram em até 30 dias', s.creds30, () => credentials.setFilter('soon'), 'warn'], ['Expiradas', s.credsExpired, () => credentials.setFilter('exp'), 'danger'], ['Sem validade', undated, () => credentials.setFilter('noexp'), 'muted']], { centerLabel: t('credenciais'), key: 'status' })),
         vizCard('Consentimentos OAuth', donut([['Com escopo de risco', s.riskyConsents, null, 'danger'], ['Demais', Math.max(0, s.consents - s.riskyConsents), null, 'info']], { centerLabel: t('consentimentos') }))));
     }
+    if (Array.isArray(p.rotation)) {
+      box.append(h('h3', null, 'Plano de renovação de credenciais'));
+      box.append(h('p', { class: 'muted' }, 'Revise os vencimentos dos próximos 90 dias por objeto e tipo de credencial. A validade no diretório não confirma qual credencial o aplicativo usa.'));
+      box.append(DataTable({ rows: p.rotation, name: 'credential-renewals', sheet: 'Renovação de credenciais', columns: [
+        { key: 'owner', label: 'Aplicativo', wrap: true }, { key: 'ownerType', label: 'Objeto', value: objectType }, { key: 'credType', label: 'Tipo', value: credentialType },
+        { key: 'nextExpiry', label: 'Próximo vencimento', render: (r) => fmtDate(r.nextExpiry), export: (r) => r.nextExpiry },
+        { key: 'expired', label: 'Expiradas' }, { key: 'within7', label: 'Em até 7 dias' }, { key: 'within30', label: 'De 8 a 30 dias' },
+        { key: 'within90', label: 'De 31 a 90 dias' }, { key: 'longValid', label: 'Ativas além de 90 dias' },
+        { key: 'objectId', label: 'ID do objeto', exportOnly: true }, { key: 'appId', label: 'App ID', exportOnly: true },
+      ], filters: [
+        { id: 'week', label: 'Vencem nesta semana', fn: (r) => r.within7 > 0 },
+        { id: 'expired', label: 'Com credencial expirada', fn: (r) => r.expired > 0 },
+        { id: 'short', label: 'Sem credencial ativa além de 90 dias', fn: (r) => r.longValid === 0 },
+      ] }));
+    }
     box.append(h('h3', null, 'Credenciais (segredos/certificados)'));
-    box.append(DataTable({ rows: p.rows, name: 'credenciais-apps', sheet: 'Credenciais de apps', columns: [
-      { key: 'owner', label: 'Aplicativo', wrap: true }, { key: 'ownerType', label: 'Objeto' }, { key: 'credType', label: 'Tipo' }, { key: 'status', label: 'Status', render: (r) => badge(r.status, { 'expirado': 'danger', 'expira <30d': 'danger', 'expira <90d': 'warn', 'ok': 'ok', 'sem validade': 'warn' }[r.status]) }, { key: 'daysToExpiry', label: 'Dias p/ expirar', render: (r) => r.daysToExpiry === null ? '—' : r.daysToExpiry }, { key: 'end', label: 'Expira em', render: (r) => fmtDate(r.end), export: (r) => r.end }, { key: 'displayName', label: 'Nome da credencial' },
+    const credentials = DataTable({ rows: p.rows, name: 'credenciais-apps', sheet: 'Credenciais de apps', columns: [
+      { key: 'owner', label: 'Aplicativo', wrap: true }, { key: 'ownerType', label: 'Objeto', value: objectType }, { key: 'credType', label: 'Tipo', value: credentialType }, { key: 'status', label: 'Status', value: expiry, render: (r) => badge(expiry(r), { 'expirado': 'danger', 'expira <30d': 'danger', 'expira <90d': 'warn', 'ok': 'ok', 'sem validade': 'warn' }[r.status]) }, { key: 'daysToExpiry', label: 'Dias p/ expirar', render: (r) => r.daysToExpiry === null ? '—' : r.daysToExpiry }, { key: 'end', label: 'Expira em', render: (r) => fmtDate(r.end), export: (r) => r.end }, { key: 'displayName', label: 'Nome da credencial' },
       { key: 'start', label: 'Criada em', exportOnly: true, export: (r) => r.start }, { key: 'appId', label: 'App ID', exportOnly: true },
-    ], filters: [{ id: 'exp', label: 'Expiradas', fn: (r) => r.daysToExpiry !== null && r.daysToExpiry < 0 }, { id: 'soon', label: 'Expiram <30d', fn: (r) => r.daysToExpiry !== null && r.daysToExpiry >= 0 && r.daysToExpiry <= 30 }, { id: 'noexp', label: 'Sem validade', fn: (r) => r.daysToExpiry === null }] }));
+      { key: 'objectId', label: 'ID do objeto', exportOnly: true }, { key: 'credentialId', label: 'ID da credencial', exportOnly: true },
+    ], filters: [{ id: 'exp', label: 'Expiradas', fn: (r) => r.daysToExpiry !== null && r.daysToExpiry < 0 }, { id: 'soon', label: 'Expiram em até 30 dias', fn: (r) => r.daysToExpiry !== null && r.daysToExpiry >= 0 && r.daysToExpiry <= 30 }, { id: 'later', label: 'Mais de 30 dias', fn: (r) => r.daysToExpiry > 30 }, { id: 'noexp', label: 'Sem validade', fn: (r) => r.daysToExpiry === null }] });
+    box.append(credentials);
     box.append(h('h3', { style: 'margin-top:16px' }, 'Consentimentos OAuth (delegados)'));
     box.append(DataTable({ rows: p.consents, name: 'consentimentos', sheet: 'Consentimentos OAuth', onRowClick: (r) => modal(r.client || r.clientId, kv([['Cliente', r.client], [t('Escopos ({n})', { n: r.scopeCount }), r.scopes], ['Escopos de risco', r.risky.length ? r.risky : '—'], ['Tenant-wide', yesNo(r.tenantWide)], ['Concessões por usuário', r.userGrants]])), columns: [
       { key: 'client', label: 'Aplicativo', wrap: true }, { key: 'scopeCount', label: 'Escopos' }, { key: 'risky', label: 'Escopos de risco', render: (r) => r.risky.length ? badge(list(r.risky, 2), 'danger') : '—', wrap: true }, { key: 'tenantWide', label: 'Tenant-wide', render: (r) => r.tenantWide ? badge('Sim', 'warn') : 'Usuário' }, { key: 'userGrants', label: 'Usuários' },
@@ -2216,7 +2337,8 @@
     ], filters: [{ id: 'risky', label: 'Com escopo de risco', fn: (r) => r.risky.length }, { id: 'tw', label: 'Tenant-wide', fn: (r) => r.tenantWide }] }));
     return box;
   }, { subtitle: 'Fonte: /applications + /servicePrincipals + /oauth2PermissionGrants. Rotacione credenciais expirando e revise consentimentos de alto privilégio.', ring: (p) => {
-    const s = p.summary, ok = Math.max(0, s.credsTotal - s.credsExpired - s.creds30), pc = pctOf(ok, s.credsTotal);
+    const s = p.summary, undated = s.credsUndated ?? p.rows.filter((r) => r.daysToExpiry == null).length;
+    const ok = Math.max(0, s.credsTotal - s.credsExpired - s.creds30 - undated), pc = pctOf(ok, s.credsTotal);
     return s.credsTotal ? { pct: pc, label: 'das credenciais de apps em dia', caption: t('{n} expiradas', { n: num(s.credsExpired) }), tone: s.credsExpired ? 'danger' : toneFor(pc, 90, 75) } : null;
   } });
 
@@ -3118,6 +3240,120 @@
   };
 
   /* Audit */
+  function reportLabel(type) {
+    if (type === 'app_devices') return t('Dispositivos com o app');
+    for (const group of NAV) {
+      const item = group.items.find(([id]) => id === type);
+      if (item) return t(item[1]);
+    }
+    return type;
+  }
+
+  function openSessionReport(payload) {
+    const type = payload._meta.report;
+    const params = payload._meta.params || {};
+    if (type === 'app_devices') {
+      // The server sorts and bounds these IDs; an older tab entry may use the original order.
+      App.cache[type + JSON.stringify(params)] = payload;
+      modal(t('Dispositivos com o app'), appDevicesPanel(params.ids, params.name));
+    } else {
+      if (type === 'usage') App.params.usagePeriod = params.period;
+      if (type === 'devices') App.params.devStale = params.stale_days;
+      App.go(type);
+    }
+  }
+
+  views.activity = () => {
+    const local = h('ul', { class: 'report-jobs' });
+    const remote = h('ul', { class: 'report-jobs' });
+    const notice = h('p', { class: 'muted small', role: 'status' });
+    const refresh = h('button', { class: 'btn sm', type: 'button', onclick: load }, icon('refresh'), 'Atualizar lista');
+    let waitController = null;
+    const stop = h('button', { class: 'btn sm', type: 'button', hidden: true, onclick: () => waitController?.abort() }, 'Cancelar espera');
+    const view = h('section', { class: 'panel report-activity' },
+      h('div', { class: 'panel-head' }, h('h2', null, 'Meus relatórios'), h('div', { class: 'job-controls' }, stop, refresh)),
+      h('p', { class: 'muted' }, 'Retome consultas interrompidas desta sessão ou abra um resultado que já chegou a esta aba.'),
+      h('h3', null, 'No servidor'), notice, remote,
+      h('h3', null, 'Disponíveis nesta aba'), local);
+    const status = { pending: 'Aguardando', running: 'Em processamento', done: 'Pronto para abrir', error: 'Falhou' };
+    let busy = false;
+    const button = (label, click) => h('button', { class: 'btn sm', type: 'button', onclick: click }, label);
+    const row = (title, detail, ...controls) => h('li', null,
+      h('div', { class: 'job-info' }, h('strong', null, raw(title)), detail),
+      h('div', { class: 'job-controls' }, ...controls));
+    const supported = (type) => App.me.reports.includes(type) && !type.startsWith('act_') && (type === 'app_devices' || typeof views[type] === 'function');
+    function drawLocal() {
+      const results = [...new Set(Object.values(App.cache))].filter((p) => supported(p?._meta?.report));
+      results.sort((a, b) => String(b._meta.generated_at).localeCompare(String(a._meta.generated_at)));
+      local.replaceChildren(...results.map((p) => {
+        const m = p._meta, params = m.params || {};
+        const suffix = m.report === 'usage' ? params.period : m.report === 'app_devices' ? params.name : '';
+        const title = reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
+        return row(title, h('small', null, raw(fmtDate(m.generated_at))), button('Abrir relatório', () => openSessionReport(p)));
+      }));
+      if (!results.length) local.append(h('li', { class: 'muted' }, 'Nenhum resultado disponível nesta aba.'));
+    }
+    async function load() {
+      if (busy) return;
+      busy = true;
+      refresh.disabled = true;
+      notice.textContent = t('Carregando…');
+      drawLocal();
+      try {
+        const { jobs } = await api('jobs', { timeout: REPORT_REQUEST_MS });
+        const rows = jobs.filter((j) => supported(j.type) && Object.hasOwn(status, j.status));
+        remote.replaceChildren(...rows.map((j) => {
+          const detail = h('small', null, t(status[j.status]), ' · ', raw(fmtDate(j.updatedAt)), ' · ', raw(j.job_id.slice(0, 8)));
+          if (j.message) detail.append(h('span', { class: 'job-message' }, j.message));
+          return row(reportLabel(j.type), detail,
+            j.status !== 'error' ? button(j.status === 'done' ? 'Abrir relatório' : 'Retomar relatório', () => manage(j, false)) : null,
+            button('Descartar', () => manage(j, true)));
+        }));
+        notice.textContent = rows.length === 50 ? t('Exibindo as 50 consultas mais recentes, com as que estão em andamento primeiro.') : rows.length ? '' : t('Nenhuma consulta pendente, resultado para retirar ou falha nesta sessão.');
+        drawLocal();
+      } catch (error) { notice.textContent = t(error.message); }
+      finally { busy = false; refresh.disabled = false; }
+    }
+    async function manage(job, discard) {
+      if (busy || (discard && !window.confirm(t('Descartar esta consulta e seus dados temporários?')))) return;
+      busy = true;
+      refresh.disabled = true;
+      for (const b of remote.querySelectorAll('button')) b.disabled = true;
+      try {
+        if (discard) {
+          await api('jobs/' + job.job_id + '/discard', { method: 'POST', timeout: REPORT_REQUEST_MS });
+          readJobs.get(job.job_id)?.controller.abort(new Error(t('Relatório descartado.')));
+        } else {
+          waitController = new AbortController();
+          stop.hidden = false;
+          const payload = await withDeadline(REPORT_WAIT_MS, waitController.signal, (signal) =>
+            followReadJob(job, (j) => { notice.textContent = t(j.message || status[j.status]); }, { signal, timeout: REPORT_REQUEST_MS }),
+            new Error(t('O relatório excedeu o tempo de espera. Gere novamente para tentar.')));
+          if (payload?._meta?.report !== job.type) throw new Error(t('O servidor devolveu um resultado inválido para o relatório.'));
+          const params = payload._meta.params;
+          App.cache[job.type + JSON.stringify(Array.isArray(params) ? {} : (params || {}))] = payload;
+          if (view.isConnected) openSessionReport(payload);
+        }
+      } catch (error) {
+        if (view.isConnected) {
+          if (waitController?.signal.aborted) notice.textContent = t('Espera interrompida. Você pode retomar o relatório enquanto ele estiver disponível.');
+          else notice.textContent = error.status === 404 ? t('O relatório foi retirado por outra aba, descartado ou expirou.') : t(error.message);
+        }
+        drawLocal();
+        return;
+      } finally {
+        waitController = null;
+        stop.hidden = true;
+        busy = false;
+        refresh.disabled = false;
+        for (const b of remote.querySelectorAll('button')) b.disabled = false;
+      }
+      if (view.isConnected) await load();
+    }
+    load();
+    return view;
+  };
+
   views.audit = () => {
     const P = App.me.privacy || CFG.privacy || {};
     const box = h('div', { class: 'panel' }, h('h2', null, 'Auditoria do tenant'), h('p', { class: 'muted small' }, t('Logins, consentimentos, relatórios executados e alterações de configuração (últimos 200 eventos). Registro pseudonimizado — sem nomes, e-mails ou IP completo — mantido por {n} dias.', { n: P.auditDays || 30 })));

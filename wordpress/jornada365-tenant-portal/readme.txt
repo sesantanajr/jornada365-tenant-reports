@@ -4,13 +4,15 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.3
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
 Portal open source de relatórios Microsoft 365, Entra ID e Intune. Cada organização conecta seu próprio tenant e pode hospedar o portal no WordPress.
 
 == Description ==
+O serviço da Jornada 365 está disponível gratuitamente para todos em [tenant.jornada365.cloud](https://tenant.jornada365.cloud/). Sua empresa também pode modificar o código aberto, personalizar a marca e o login e hospedar o portal no próprio WordPress.
+
 Um administrador com função de registro e consentimento conecta a empresa pelo portal. O aplicativo de página única é registrado no diretório da empresa. Os relatórios usam as permissões delegadas de leitura da conta que entra. Os módulos de ação habilitados requerem permissões adicionais. O portal oferece relatórios de identidade, MFA, contas inativas, dispositivos (híbridos, cloud-only, obsoletos, suporte do SO, filtro por plataforma), aplicativos e versões (com homologação), Acesso Condicional, grupos, licenciamento & custo, colaboração externa (convidados), domínios, políticas de autenticação, acessos privilegiados (PIM), risco (Identity Protection), consentimentos/credenciais de apps, Secure Score, uso do M365, caixas de correio (cotas e arquivamento) e OneDrive/SharePoint (limites e Top N).
 
 Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft): ações remotas do Intune (sincronizar, reiniciar, verificação e atualização do Microsoft Defender), arquivamento de caixas (ativar ou desativar o arquivo morto, expansão automática e sincronização imediata) e exibição dos nomes nos relatórios de uso. Exportação Excel nativa com resumo executivo, gráficos e tabelas filtráveis, gerada no navegador. O WordPress guarda configurações, auditoria limitada e estado temporário dos relatórios em processamento.
@@ -25,12 +27,27 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.3.0 =
+English
+
+* Resume, open or discard your own report jobs from My reports.
+* Review application secret and certificate renewals in 7-, 30- and 90-day windows. Credentials without an expiration date are shown separately.
+* Executive Excel workbooks include linked summaries and data sheets, a filterable findings and warnings register and native charts. CSV uses the selected locale.
+* The GitHub README includes English and Brazilian Portuguese instructions, screenshots and example workbooks. The hosted portal is free and companies can customize and host the open-source plugin.
+
+Português do Brasil
+
+* Em Meus relatórios, retome consultas da sua sessão, abra resultados prontos ou descarte trabalhos de leitura.
+* Revise vencimentos de segredos e certificados por aplicação e por objeto em janelas de 7, 30 e 90 dias. Credenciais sem data de validade têm uma categoria própria.
+* O Excel executivo reúne as observações e falhas de coleta em uma aba filtrável, com links entre capa, resumo e detalhes. O CSV usa os separadores do idioma escolhido.
+* Documentação em inglês e português brasileiro, com capturas da mesma tela nos dois idiomas e instruções para usar o serviço gratuito ou personalizar uma instalação própria.
+
 = 1.2.3 =
 * Recupera falhas temporárias ao iniciar um relatório e retoma leituras paginadas do Graph a partir do progresso salvo.
 * Mostra quando os dados foram gerados, preserva a tabela em caso de falha na atualização e mantém o botão de limpar filtros visível no celular.
 * Permite ordenar pelo teclado e informa a direção da ordenação aos leitores de tela.
 * Usa os salts do WordPress em hospedagens que os mantêm no banco. Nessas instalações, pode ser necessário entrar novamente após atualizar.
-* A distribuição inclui um instalador do portal e testes automáticos publicados no GitHub.
+* A distribuição inclui um instalador do portal publicado nos lançamentos do GitHub.
 
 = 1.2.2 =
 * Relatórios com chamadas de leitura limitadas por etapa, retomada após limites da Microsoft e consultas complementares mais seletivas.

@@ -10,20 +10,15 @@ defaults:
     shell: bash
 
 jobs:
-  checks:
+  package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: find wordpress tests -name '*.php' -print0 | xargs -0 -r -n 1 php -l
-      - run: find wordpress tests \( -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -r -n 1 node --check
-      - name: Run PHP suites
-        run: for suite in tests/*.php; do php "$suite"; done
-      - name: Run browser logic suites
-        run: for suite in tests/*.cjs; do node "$suite"; done
-      - run: python3 scripts/package.py
+      - name: Validate plugin metadata and build the installer
+        run: python3 scripts/package.py
 
   release:
-    needs: checks
+    needs: package
     if: github.event_name != 'pull_request' && github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     permissions:

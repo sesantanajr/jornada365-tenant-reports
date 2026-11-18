@@ -28,4 +28,4 @@ Conceda permissões delegadas e funções Microsoft conforme os relatórios e op
 
 ## Validação
 
-A suíte cobre assinatura e rotação de chaves Entra, escape de CSV e sintaxe PHP/JavaScript. A validação local usa uma instalação descartável de WordPress. O uso autenticado de Graph, Intune e Exchange deve ser validado com um tenant e recursos de homologação.
+A validação local usou uma instalação descartável de WordPress. O uso autenticado de Graph, Intune e Exchange precisa de um tenant e recursos de homologação.

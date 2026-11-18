@@ -26,4 +26,4 @@ Em WordPress 7.1.4 com PHP 8.5.12 e SQLite, iniciamos o relatório de Domínios 
 
 No Chrome, testamos o relatório de Grupos em larguras de 320, 390 e 1440 pixels. Depois de uma busca sem correspondências, o botão **Limpar filtros** permanece visível e devolve o foco à busca. A ordenação pode ser operada pelo teclado. Se uma atualização falha, a tabela mantém os dados que o usuário já estava consultando.
 
-A suíte pública também cobre paginação de outros relatórios, respostas parciais em lote, recuperação da autorização e operações no navegador. Os tempos reais dependem da hospedagem, do volume de dados e das respostas do tenant Microsoft. [Testes automatizados](../tests) · [Guia de desempenho](desempenho.md)
+Os tempos reais dependem da hospedagem, do volume de dados e das respostas do tenant Microsoft. [Guia de desempenho](desempenho.md)

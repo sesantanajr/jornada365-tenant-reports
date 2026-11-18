@@ -1,52 +1,83 @@
-# Tenant Jornada365
+# Jornada 365 Tenant Reports
 
-![Jornada 365 Tenant Reports, com três painéis de relatórios em azul](docs/assets/capa-tenant-reports.webp)
+**The portal is free for everyone at [tenant.jornada365.cloud](https://tenant.jornada365.cloud/).** Use it to review your organization's Microsoft 365 environment. If your company wants its own domain, branding or sign-in experience, you can modify this open-source WordPress plugin and run it on your own hosting, including shared hosting.
 
-O [tenant.jornada365.cloud](https://tenant.jornada365.cloud/) é uma solução **open source** para diagnosticar e administrar recursos do Microsoft 365. O código é distribuído como plugin WordPress sob a licença [GPL-2.0-or-later](LICENSE) e pode ser instalado na hospedagem da própria organização.
+[English](#english) · [Português do Brasil](#português-do-brasil) · [Download the WordPress plugin](https://github.com/sesantanajr/jornada365-tenant-reports/releases/latest/download/jornada365-tenant-portal.zip)
 
-O portal reúne relatórios de identidade, segurança, licenças, uso e dispositivos. Operações como sincronização do Intune e arquivamento de caixas de correio usam as permissões delegadas da conta Microsoft. As equipes podem revisar os relatórios no portal e exportar um Excel executivo com gráficos e tabelas.
+![Jornada 365 Tenant Reports. Blue cloud and circuit artwork based on the Jornada 365 identity.](docs/assets/capa-tenant-reports.webp)
 
-Criado por Sérgio Sant'Ana Júnior, da Jornada 365. Este repositório é a distribuição pública da linha do portal.
+## English
 
-[Baixar o plugin para WordPress](https://github.com/sesantanajr/jornada365-tenant-reports/releases/latest/download/jornada365-tenant-portal.zip) · [Histórico de versões](https://github.com/sesantanajr/jornada365-tenant-reports/releases) · [Como contribuir](CONTRIBUTING.md)
+### Use the free portal
 
-## O que o portal oferece
+Open the hosted portal and select **Sign in with Microsoft 365**. On first use, an authorized administrator connects the organization's Microsoft Entra directory and reviews the requested permissions. After setup, people with an allowed role can sign in with their work accounts. Access to individual Microsoft services depends on the organization's licenses and delegated permissions. [Open the portal in English](https://tenant.jornada365.cloud/?lang=en)
 
-- **Entra ID e segurança.** Identidade, MFA, contas inativas, convidados, grupos, Acesso Condicional, funções privilegiadas, PIM, risco, aplicativos, consentimentos e Secure Score.
-- **Microsoft 365 e Intune.** Licenciamento, inventário e conformidade de dispositivos, versões de aplicativos, uso do Microsoft 365, caixas de correio, OneDrive e SharePoint.
-- **Ações delegadas.** Sincronização, reinício e tarefas do Defender em dispositivos elegíveis, operações de arquivo de caixas e ajuste de privacidade de relatórios de uso. A Microsoft aplica as permissões da conta e os requisitos de função e licença de cada operação.
-- **Exportação.** Tabelas em CSV e pastas Excel com resumo executivo, gráficos e filtros.
+### What you can manage
 
-![Relatório de Grupos com 40 grupos fictícios e indicadores de proprietários, tipo e origem](docs/assets/relatorio-grupos.webp)
+| Area | What the portal helps you do |
+| --- | --- |
+| Identity and security | Review users, guests, inactive accounts, MFA, privileged roles, Conditional Access and Secure Score. |
+| Applications and credentials | Inspect OAuth consents and plan secret and certificate renewals. See upcoming expirations in three windows and identify objects with no credential of the same type active beyond 90 days. |
+| Microsoft 365 and devices | Review licenses, groups, service usage, mailbox quotas, OneDrive, SharePoint and Intune inventory. |
+| My reports | Resume a pending query, open a result already delivered to this tab, or discard a report job from your own session. |
+| Delegated operations | Run supported Intune device actions and Exchange mailbox archive operations with the signed-in account's permissions. |
+| Excel and CSV | Export a table or build an executive workbook with linked summaries, native Excel charts and filterable data sheets. **Findings and warnings** collects items that need attention, including sections that could not be retrieved. |
 
-*Relatório de Grupos em uma organização fictícia. Os indicadores e gráficos permitem filtrar os dados exibidos na tabela.*
+![English interface showing group ownership, membership and group types in a fictional Microsoft 365 tenant.](docs/assets/report-groups-en.webp)
 
-## Instalação
+*Groups report in English. The Brazilian Portuguese screenshot below uses the same 40 fictional groups.*
 
-1. Use WordPress 6.4 ou superior, PHP 8.1 ou superior e HTTPS. A hospedagem precisa permitir as conexões HTTPS de saída necessárias à Microsoft.
-2. Baixe o instalador pelo link acima. Em **Plugins → Adicionar plugin → Enviar plugin**, selecione `jornada365-tenant-portal.zip` e ative. Para atualizar uma instalação existente, escolha **Substituir a versão atual pela enviada**. Esse procedimento usa apenas o painel do WordPress.
-3. No painel, abra **Tenant Jornada365 → Assistente**. Use a URL de retorno SPA que ele exibir e teste a comunicação com a Microsoft.
-4. Abra o portal, selecione **Entrar com Microsoft 365** e, com um administrador autorizado do tenant de teste, selecione **Conectar o tenant**. O assistente orienta o registro do aplicativo e o consentimento delegado no diretório da organização.
-5. Valide primeiro um relatório com dados de teste. Teste as ações delegadas com dispositivos ou caixas de laboratório e as funções necessárias.
+In **Overview**, select **Build executive Excel** to choose the sections for your workbook. Open an example generated by the portal to try its sheet links and filters. [Download the example workbook in English](docs/examples/tenant-review-en.xlsx?raw=true)
 
-O aplicativo do portal é registrado em cada tenant. O login usa autorização com PKCE. Configurações de conexão, metadados e auditoria limitada podem ser persistidos no WordPress. Consulte a [análise da versão](docs/analise-da-versao.md) para os detalhes de armazenamento e integração.
+### Host and customize it for your company
 
-## Login corporativo
+1. Use WordPress 6.4 or newer, PHP 8.1 or newer, HTTPS and outbound connectivity to Microsoft. Download the installable ZIP from Releases. [WordPress installer](https://github.com/sesantanajr/jornada365-tenant-reports/releases/latest/download/jornada365-tenant-portal.zip)
+2. In **Plugins → Add Plugin → Upload Plugin**, upload the ZIP and activate it. For an upgrade, choose **Replace current with uploaded**. Installation works from the WordPress dashboard on shared hosting.
+3. Create a WordPress page for the portal and select it in **Tenant Jornada365 → Configurações → Página do portal**. You can also place the shortcode `[j365_tenant_portal]` on a page. In the setup assistant (**Assistente**), verify the HTTPS sign-in callback for your domain.
+4. In **Configurações**, set your company name, logo, support contact, policy links and enabled modules. For a single-company login, enter the Microsoft Entra directory ID under **Login corporativo**, customize the button and copy the sign-in link for your intranet.
+5. Open your new portal and connect the directory with an authorized administrator. Use the exact SPA redirect URI shown by your installation when configuring the app registration.
 
-Em **Tenant Jornada365 → Configurações → Login corporativo**, defina o ID do diretório Microsoft Entra da empresa e, se quiser, personalize o texto do botão. Após salvar, copie o link direto para a intranet ou o site interno. O portal valida o diretório antes de criar a sessão e durante o uso. Consulte o [guia de configuração](docs/login-corporativo.md).
+**Data handling.** WordPress stores portal settings, tenant bindings and a pseudonymized audit trail. During generation, it temporarily stores encrypted report state. Collecting the completed result removes the job. Abandoned jobs are cleaned up periodically. The browser builds the final workbook. Credential reports use identifiers and validity dates.
 
-## Relatórios e interface
+The installer is built from `wordpress/jornada365-tenant-portal/`. To build it locally, run `python scripts/package.py` from the repository root. The ZIP is written to `dist/`. Created by Sérgio Sant'Ana Júnior, Jornada 365. [GPL-2.0-or-later](LICENSE) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releases](https://github.com/sesantanajr/jornada365-tenant-reports/releases)
 
-Se a conexão cair ao iniciar um relatório, o portal pode reencontrar a mesma execução. Durante a leitura, as páginas já recebidas são reaproveitadas pelos relatórios que percorrem coleções grandes. A interface permite acompanhar ou interromper a espera e exportar o resultado em CSV ou Excel. [Correções da versão 1.2.3](docs/versao-1.2.3.md) · [Desempenho e homologação](docs/desempenho.md)
+The bundled Fluent icons have an MIT notice, and the fonts have SIL Open Font License notices. [Icon credits](wordpress/jornada365-tenant-portal/assets/icons/LICENSE-fluentui-system-icons.txt) · [Font notices](wordpress/jornada365-tenant-portal/assets/fonts)
 
-## Desenvolvimento
+## Português do Brasil
 
-```bash
-find wordpress -name '*.php' -print0 | xargs -0 -r -n 1 php -l
-for suite in tests/*.php; do php "$suite" || exit 1; done
-for suite in tests/*.cjs; do node "$suite" || exit 1; done
-```
+**O portal está disponível gratuitamente para todos em [tenant.jornada365.cloud](https://tenant.jornada365.cloud/).** Use o serviço para analisar o Microsoft 365 da sua organização. Se a empresa precisar de domínio, identidade visual ou login próprios, pode modificar este plugin WordPress de código aberto e implantá-lo na hospedagem da empresa, inclusive em hospedagem compartilhada.
 
-Para gerar o instalador a partir do código-fonte, execute `python scripts/package.py` na raiz. O ZIP fica em `dist/`. O guia de contribuição explica como propor uma mudança e reproduzir um problema com dados de teste. Para comunicar uma falha de segurança, consulte a [política de segurança](SECURITY.md).
+### Usar o portal gratuito
 
-Código sob [GPL-2.0-or-later](LICENSE). Os avisos MIT dos ícones Fluent e OFL das fontes estão nas pastas de [ícones](wordpress/jornada365-tenant-portal/assets/icons/LICENSE-fluentui-system-icons.txt) e [fontes](wordpress/jornada365-tenant-portal/assets/fonts/OFL-Inter.txt). Marcas identificam seus respectivos titulares.
+Abra o portal e selecione **Entrar com Microsoft 365**. No primeiro acesso, um administrador autorizado conecta o diretório Microsoft Entra da empresa e revisa as permissões solicitadas. Depois, as pessoas com uma função aceita pelo portal entram com a conta corporativa. O acesso a cada serviço Microsoft depende das licenças e permissões delegadas da organização. [Abrir o portal em português](https://tenant.jornada365.cloud/?lang=pt-BR)
+
+### O que você pode gerenciar
+
+| Área | O que o portal permite fazer |
+| --- | --- |
+| Identidade e segurança | Revisar usuários, convidados, contas inativas, MFA, funções privilegiadas, Acesso Condicional e Secure Score. |
+| Aplicativos e credenciais | Revisar consentimentos OAuth e planejar a renovação de segredos e certificados. Identifique vencimentos em três faixas e objetos sem outra credencial do mesmo tipo ativa além de 90 dias. |
+| Microsoft 365 e dispositivos | Analisar licenças, grupos, uso dos serviços, cotas de caixas de correio, OneDrive, SharePoint e inventário do Intune. |
+| Meus relatórios | Retomar uma consulta pendente, abrir um resultado já entregue à aba ou descartar um trabalho de relatório da própria sessão. |
+| Operações delegadas | Executar ações suportadas em dispositivos do Intune e gerenciar o arquivamento de caixas no Exchange com as permissões da conta conectada. |
+| Excel e CSV | Exportar uma tabela ou montar uma pasta de trabalho com resumos interligados, gráficos nativos do Excel e abas filtráveis. **Observações e avisos** reúne os itens que merecem atenção, inclusive as seções que falharam na coleta. |
+
+![Interface em português brasileiro mostrando proprietários, membros e tipos de grupos em um tenant Microsoft 365 fictício.](docs/assets/report-groups-pt-br.webp)
+
+*Relatório de Grupos em português brasileiro. São os mesmos 40 grupos fictícios da captura em inglês.*
+
+Em **Visão geral**, selecione **Gerar Excel executivo** e escolha as seções da planilha. Baixe um exemplo gerado pelo portal para experimentar os links entre abas e os filtros. [Baixar a planilha de exemplo em português](docs/examples/tenant-review-pt-br.xlsx?raw=true)
+
+### Hospedar e personalizar para sua empresa
+
+1. Use WordPress 6.4 ou superior, PHP 8.1 ou superior, HTTPS e acesso de saída aos serviços Microsoft. Baixe o ZIP instalável na página de lançamentos. [Instalador para WordPress](https://github.com/sesantanajr/jornada365-tenant-reports/releases/latest/download/jornada365-tenant-portal.zip)
+2. No WordPress, abra **Plugins → Adicionar plugin → Enviar plugin**, envie o ZIP e ative. Para atualizar, selecione **Substituir a versão atual pela enviada**. O procedimento funciona pelo painel em hospedagem compartilhada.
+3. Crie uma página no WordPress e selecione-a em **Tenant Jornada365 → Configurações → Página do portal**. Também é possível inserir o shortcode `[j365_tenant_portal]` em uma página. Em **Assistente**, confira o endereço HTTPS de retorno do login no seu domínio.
+4. Em **Configurações**, defina nome, logo, contato de suporte, links das políticas e módulos habilitados. Para usar um login exclusivo da empresa, informe o ID do diretório Microsoft Entra em **Login corporativo**, personalize o botão e copie o link para a intranet. [Guia do login corporativo](docs/login-corporativo.md)
+5. Abra o portal da empresa e conecte o diretório com um administrador autorizado. Ao configurar o registro de aplicativo, use exatamente o endereço de retorno SPA mostrado na sua instalação.
+
+**Uso dos dados.** O WordPress guarda as configurações do portal, os vínculos dos tenants e a auditoria pseudonimizada. Durante a geração, o progresso do relatório fica temporariamente cifrado. A coleta do resultado remove o trabalho concluído. Uma rotina periódica limpa os trabalhos abandonados. O navegador gera a planilha final. Os relatórios de credenciais usam identificadores e datas de validade. [Desempenho e implantação](docs/desempenho.md)
+
+O instalador é gerado a partir de `wordpress/jornada365-tenant-portal/`. Para compilá-lo localmente, execute `python scripts/package.py` na raiz do repositório. O ZIP fica em `dist/`. Projeto criado por Sérgio Sant'Ana Júnior, da Jornada 365. [GPL-2.0-or-later](LICENSE) · [Contribuições](CONTRIBUTING.md) · [Segurança](SECURITY.md) · [Lançamentos](https://github.com/sesantanajr/jornada365-tenant-reports/releases)
+
+Os ícones Fluent incluem o aviso da licença MIT e as fontes incluem os avisos da SIL Open Font License. [Créditos dos ícones](wordpress/jornada365-tenant-portal/assets/icons/LICENSE-fluentui-system-icons.txt) · [Licenças das fontes](wordpress/jornada365-tenant-portal/assets/fonts)

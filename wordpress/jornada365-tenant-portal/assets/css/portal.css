@@ -1332,6 +1332,16 @@ pre.code { margin: 10px 0; max-height: 46vh; overflow: auto; padding: 14px 16px;
 .dlg .rp-tools { padding-left: 0; }
 .dlg .rp-body { padding: 14px; }
 
+.report-activity { padding: clamp(16px, 3vw, 30px); }
+.report-activity .panel-head { padding: 0; }
+.report-activity h3 { margin-top: 1.5rem; }
+.report-jobs { list-style: none; margin: 0; padding: 0; }
+.report-jobs li { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem 1rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
+.report-jobs .job-info { flex: 1 1 18rem; min-width: 0; overflow-wrap: anywhere; }
+.report-jobs small, .report-jobs .job-message { display: block; }
+.report-activity .job-controls { display: flex; flex-wrap: wrap; gap: .4rem; }
+.report-activity button[hidden] { display: none; }
+
 @media (max-width: 640px) {
   .dt .search { flex-basis: 100%; max-width: none; }
   .dt .tb-actions, .dt .pager-actions { flex-wrap: wrap; }

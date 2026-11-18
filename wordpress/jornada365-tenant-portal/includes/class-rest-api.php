@@ -41,6 +41,8 @@ final class Rest_Api {
 		register_rest_route( self::NS, '/me', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'me' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/reports/(?P<type>[a-z_]+)', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'start_report' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/jobs/(?P<id>[0-9a-f-]{36})/run', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'run_job' ], 'permission_callback' => $auth ] );
+		register_rest_route( self::NS, '/jobs', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'list_report_jobs' ], 'permission_callback' => $auth ] );
+		register_rest_route( self::NS, '/jobs/(?P<id>[0-9a-f-]{36})/discard', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'discard_report_job' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/jobs/(?P<id>[0-9a-f-]{36})/result', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'job_result' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/allowlist', [
 			[ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'allowlist_get' ], 'permission_callback' => $auth ],
@@ -238,7 +240,26 @@ final class Rest_Api {
 	public function run_job( WP_REST_Request $request ) {
 		$s = $this->session();
 		try {
-			return new WP_REST_Response( Jobs::run( (string) $request['id'], $s ) );
+			return new WP_REST_Response( Jobs::run( (string) $request['id'], $s, '1' === (string) $request->get_header( 'x-j365-report-only' ) ) );
+		} catch ( \Throwable $e ) {
+			return $this->error( $e );
+		}
+	}
+
+	public function list_report_jobs() {
+		try {
+			return new WP_REST_Response( [ 'jobs' => Jobs::reports_for_session( $this->session() ) ] );
+		} catch ( \Throwable $e ) {
+			return $this->error( $e );
+		}
+	}
+
+	public function discard_report_job( WP_REST_Request $request ) {
+		try {
+			if ( Jobs::discard_report( (string) $request['id'], $this->session() ) ) {
+				return new WP_REST_Response( [ 'discarded' => true ] );
+			}
+			return new WP_Error( 'j365_not_found', 'Relatório indisponível nesta sessão.', [ 'status' => 404 ] );
 		} catch ( \Throwable $e ) {
 			return $this->error( $e );
 		}
@@ -246,7 +267,7 @@ final class Rest_Api {
 
 	public function job_result( WP_REST_Request $request ) {
 		$s      = $this->session();
-		$result = Jobs::result( (string) $request['id'], $s );
+		$result = Jobs::result( (string) $request['id'], $s, '1' === (string) $request->get_header( 'x-j365-report-only' ) );
 		if ( null === $result ) {
 			return new WP_Error( 'j365_not_ready', 'Resultado indisponível (job não concluído ou expirado).', [ 'status' => 404 ] );
 		}

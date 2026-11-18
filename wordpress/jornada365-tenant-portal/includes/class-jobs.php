@@ -179,22 +179,72 @@ final class Jobs {
 		];
 	}
 
+	/** List metadata only. The encrypted report can be much larger than the list itself. */
+	public static function reports_for_session( array $session ): array {
+		global $wpdb;
+		$table = Installer::table( 'jobs' );
+		$types = array_values( array_intersect( array_keys( self::registry() ), Settings::active_reports() ) );
+		if ( ! $types ) {
+			return [];
+		}
+		$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - self::TTL );
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			"SELECT job_id, job_type, status, progress, total, message, updated_at FROM {$table}
+			 WHERE tenant_id = %s AND user_oid = %s AND updated_at >= %s AND job_type IN ({$placeholders})
+			 ORDER BY CASE WHEN status IN ('pending','running') THEN 0 ELSE 1 END, updated_at DESC, job_id DESC LIMIT 50",
+			array_merge( [ strtolower( $session['tenant_id'] ), $session['owner'], $cutoff ], $types )
+		), ARRAY_A );
+		if ( $wpdb->last_error ) {
+			throw new \RuntimeException( 'Não foi possível consultar os relatórios da sessão.' );
+		}
+		return array_map( static function ( array $row ): array {
+			return self::public_view( $row ) + [ 'updatedAt' => str_replace( ' ', 'T', $row['updated_at'] ) . 'Z' ];
+		}, $rows );
+	}
+
+	/** Remove an owned read job. A running worker can only UPDATE this row; it cannot recreate it. */
+	public static function discard_report( string $job_id, array $session ): bool {
+		global $wpdb;
+		$table = Installer::table( 'jobs' );
+		$types = array_keys( self::registry() );
+		$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
+		$count = $wpdb->query( $wpdb->prepare(
+			"DELETE FROM {$table} WHERE job_id = %s AND tenant_id = %s AND user_oid = %s AND job_type IN ({$placeholders})",
+			array_merge( [ $job_id, strtolower( $session['tenant_id'] ), $session['owner'] ], $types )
+		) );
+		if ( false === $count ) {
+			throw new \RuntimeException( 'Não foi possível descartar o relatório.' );
+		}
+		return 1 === $count;
+	}
+
 	/**
 	 * Executes one time-boxed step.
 	 */
-	public static function run( string $job_id, array $session ): array {
+	public static function run( string $job_id, array $session, bool $reports_only = false ): array {
 		global $wpdb;
 		$table = Installer::table( 'jobs' );
+		// The activity UI can resume reads only. Check this inside the lease claim,
+		// before an action could run, even if the client submits a different id.
+		$read_guard = '';
+		if ( $reports_only ) {
+			$types = array_values( array_intersect( array_keys( self::registry() ), Settings::active_reports() ) );
+			if ( ! $types ) {
+				throw new \InvalidArgumentException( 'Relatório indisponível nesta sessão.' );
+			}
+			$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
+			$read_guard = " AND job_type IN ({$placeholders}) AND updated_at >= %s";
+		}
 		// Load the state after acquiring the lease. Loading it before the UPDATE could replay
 		// old progress if another request completed a step between the SELECT and the claim.
 		$claimed = $wpdb->query(
 			$wpdb->prepare(
-				"UPDATE {$table} SET status = 'running', updated_at = %s WHERE job_id = %s AND tenant_id = %s AND user_oid = %s AND (status = 'pending' OR (status = 'running' AND job_type NOT IN ('act_sync','act_archive') AND updated_at < %s))",
-				gmdate( 'Y-m-d H:i:s' ),
-				$job_id,
-				strtolower( $session['tenant_id'] ),
-				$session['owner'],
-				gmdate( 'Y-m-d H:i:s', time() - self::LOCK_SECONDS )
+				"UPDATE {$table} SET status = 'running', updated_at = %s WHERE job_id = %s AND tenant_id = %s AND user_oid = %s AND (status = 'pending' OR (status = 'running' AND job_type NOT IN ('act_sync','act_archive') AND updated_at < %s)){$read_guard}",
+				array_merge( [
+					gmdate( 'Y-m-d H:i:s' ), $job_id, strtolower( $session['tenant_id'] ), $session['owner'],
+					gmdate( 'Y-m-d H:i:s', time() - self::LOCK_SECONDS ),
+				], $reports_only ? array_merge( $types, [ gmdate( 'Y-m-d H:i:s', time() - self::TTL ) ] ) : [] )
 			)
 		);
 		if ( false === $claimed ) {
@@ -203,6 +253,9 @@ final class Jobs {
 		$row = self::get( $job_id, $session );
 		if ( ! $row ) {
 			throw new \InvalidArgumentException( 'Relatório não encontrado (expirado ou de outra sessão). Gere novamente.' );
+		}
+		if ( $reports_only && ( ! in_array( $row['job_type'], $types, true ) || strtotime( $row['updated_at'] . ' UTC' ) < time() - self::TTL ) ) {
+			throw new \InvalidArgumentException( 'Relatório indisponível nesta sessão.' );
 		}
 		if ( ! $claimed ) {
 			// An abandoned write might already have reached Microsoft Graph or Exchange. Its lease
@@ -368,15 +421,23 @@ final class Jobs {
 	/**
 	 * Returns the result exactly once and deletes the row immediately (nothing stays on the server).
 	 */
-	public static function result( string $job_id, array $session ): ?array {
+	public static function result( string $job_id, array $session, bool $reports_only = false ): ?array {
 		$row = self::get( $job_id, $session );
 		if ( ! $row || 'done' !== $row['status'] ) {
 			return null;
 		}
+		if ( $reports_only && ( ! isset( self::registry()[ $row['job_type'] ] )
+			|| ! in_array( $row['job_type'], Settings::active_reports(), true )
+			|| strtotime( $row['updated_at'] . ' UTC' ) < time() - self::TTL ) ) {
+			return null;
+		}
 		$box = self::open( $row['state'], $session['data_key'] );
 		global $wpdb;
-		$wpdb->delete( Installer::table( 'jobs' ), [ 'job_id' => $job_id ] );
-		return is_array( $box['result'] ?? null ) ? $box['result'] : null;
+		$deleted = $wpdb->delete( Installer::table( 'jobs' ), [
+			'job_id' => $job_id, 'tenant_id' => strtolower( $session['tenant_id'] ), 'user_oid' => $session['owner'], 'status' => 'done',
+		] );
+		// Only one tab wins collection, including a race with an explicit discard.
+		return 1 === $deleted && is_array( $box['result'] ?? null ) ? $box['result'] : null;
 	}
 
 	/** Deletes every job older than the TTL (abandoned tabs, expired sessions). */

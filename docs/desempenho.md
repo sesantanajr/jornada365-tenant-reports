@@ -21,4 +21,4 @@ Abra um relatório com volume representativo de dados, por exemplo o de privilé
 
 Se os relatórios demoram porque a Microsoft limita a taxa, registre o relatório afetado, a hora do teste, a quantidade aproximada de objetos e o código HTTP. Isso permite diferenciar limite remoto de interrupção na hospedagem. Remova tokens, nomes, identificadores de tenant e dados de relatórios ao compartilhar os registros. [Orientações de throttling do Microsoft Graph](https://learn.microsoft.com/en-us/graph/throttling)
 
-A aplicação precisa de um tenant Microsoft Entra para medir a duração em uso real. Os testes da distribuição exercitam a lógica de relatórios e as respostas simuladas, conforme a suíte, e validam instalação e rotas em WordPress descartável.
+A duração em uso real depende da hospedagem e do tenant Microsoft Entra. Para comparar duas versões, registre o tempo de geração com o mesmo relatório, a mesma conta e volumes de dados semelhantes.

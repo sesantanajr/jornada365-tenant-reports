@@ -82,8 +82,23 @@
   const svg = (markup, cls = '') => { const s = document.createElement('span'); s.className = 'svgw ' + cls; s.innerHTML = markup; return s; };
 
   /* ------------------------------------------------------------ formatting (active locale) */
-  const fmtDate = (iso) => { if (!iso) return '—'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString(INTL, { dateStyle: 'short', timeStyle: 'short' }); };
-  const fmtDay = (iso) => { if (!iso) return '—'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleDateString(INTL); };
+  const calendarDate = /^\d{4}-\d{2}-\d{2}$/;
+  const calendarFormats = new Map();
+  function fmtDay(iso) {
+    if (!iso) return '—';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    if (!calendarDate.test(iso)) return date.toLocaleDateString(INTL);
+    // Graph date-only fields represent a calendar day regardless of the viewer's time zone.
+    if (!calendarFormats.has(INTL)) calendarFormats.set(INTL, new Intl.DateTimeFormat(INTL, { timeZone: 'UTC' }));
+    return calendarFormats.get(INTL).format(date);
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    if (calendarDate.test(iso)) return fmtDay(iso);
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(INTL, { dateStyle: 'short', timeStyle: 'short' });
+  }
   const num = (n) => (n === null || n === undefined || n === '' ? '—' : Number(n).toLocaleString(INTL));
   function sleep(ms, signal) {
     if (signal?.aborted) return Promise.reject(signal.reason);
@@ -224,6 +239,7 @@
   async function requestApi(path, opts, signal, renewed = false) {
     signal?.throwIfAborted();
     const headers = { 'Content-Type': 'application/json', 'X-J365-Nonce': CFG.nonce || '', 'X-Requested-With': 'XMLHttpRequest', 'X-J365-Lang': CFG.lang || 'pt-BR' };
+    if (opts.reportOnly) headers['X-J365-Report-Only'] = '1';
     // Per-tenant model: the admin's delegated tokens (this tab only) go with every call; never stored by the server.
     const A = window.J365Auth;
     const tokens = !opts.anon && A && A.enabled() && CFG.authenticated;
