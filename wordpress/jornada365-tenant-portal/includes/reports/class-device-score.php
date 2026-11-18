@@ -58,6 +58,37 @@ final class Device_Score extends Report_Base {
 		return [ 'score' => self::score( $item['overallScore'] ?? null, $state ), 'state' => $state, 'metrics' => $metrics ];
 	}
 
+	/** ScoreHistory is a collection. Its records have no health state and may arrive in any order. */
+	private static function observe_history( array &$state, array $row ): void {
+		++$state['history_count'];
+		$score = self::score( $row['overallScore'] ?? null );
+		$date  = (string) ( $row['startupDateTime'] ?? '' );
+		if ( null === $score || ! preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/D', $date ) ) {
+			return;
+		}
+		try {
+			$instant = new \DateTimeImmutable( $date );
+			$errors = \DateTimeImmutable::getLastErrors();
+			if ( $errors && ( $errors['warning_count'] || $errors['error_count'] ) ) {
+				return;
+			}
+		} catch ( \Exception $ignored ) {
+			return;
+		}
+		$date = $instant->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d\TH:i:s.v\Z' );
+		if ( $date <= ( $state['historical']['measuredAt'] ?? '' ) ) {
+			return;
+		}
+		$metrics = [];
+		foreach ( [ 'boot' => 'startupScore', 'apps' => 'appHealthOverallScore', 'work' => 'workFromAnywhereScore', 'battery' => 'batteryHealthScore' ] as $key => $field ) {
+			$value = self::score( $row[ $field ] ?? null );
+			if ( null !== $value ) {
+				$metrics[] = [ 'metric' => $key, 'score' => $value, 'state' => '' ];
+			}
+		}
+		$state['historical'] = [ 'score' => $score, 'state' => '', 'metrics' => $metrics, 'measuredAt' => $date, 'source' => 'history' ];
+	}
+
 	public function step( array $state, array $params, float $deadline ): array {
 		$devices = 'devices' === ( $params['section'] ?? '' );
 		if ( ! $devices && 0 === $state['phase'] ) {
@@ -66,6 +97,7 @@ final class Device_Score extends Report_Base {
 			} catch ( Graph_Exception $error ) {
 				$this->optional_error( $state, 'Pontuação do tenant indisponível', $error );
 				$state['overview_error'] = $error->report_issue();
+				$state['use_history'] = $error->resource_missing();
 			}
 			$state['phase'] = 1;
 		}
@@ -82,19 +114,33 @@ final class Device_Score extends Report_Base {
 				throw $error;
 			}
 			$this->optional_error( $state, $devices ? 'Lista de dispositivos incompleta' : 'Referências de comparação indisponíveis', $error );
-			if ( ! $devices && ! empty( $state['overview_error'] ) && empty( $state['rows'] ) ) {
+			if ( ! $devices && empty( $state['use_history'] ) && ! empty( $state['overview_error'] ) && empty( $state['rows'] ) ) {
 				$first = $state['overview_error'];
 				throw new Graph_Exception( 'O Intune não disponibilizou o resumo do Endpoint Analytics.', $first['status'], $first['code'] );
 			}
 			$state['partial'] = true;
+			$state['rows_done'] = true;
 			$done = true;
 		}
-		return [ 'state' => $state, 'done' => $done, 'progress' => count( $state['rows'] ?? [] ), 'total' => 0,
+		if ( $done && ! empty( $state['use_history'] ) ) {
+			$state['phase'] = 2;
+			$state['history_count'] ??= 0;
+			try {
+				$done = $this->fetch_collection( $state, 'history', self::ROOT . 'ScoreHistory', $deadline, [], null, self::observe_history(...) );
+				$state['history_status'] = $done ? ( isset( $state['historical'] ) ? 'ok' : 'empty' ) : 'loading';
+			} catch ( Graph_Exception $error ) {
+				$this->optional_error( $state, 'Histórico de experiência indisponível', $error );
+				$state['history_status'] = isset( $state['historical'] ) ? 'partial' : 'unavailable';
+				$done = true;
+			}
+		}
+		return [ 'state' => $state, 'done' => $done, 'progress' => count( $state['rows'] ?? [] ) + ( $state['history_count'] ?? 0 ), 'total' => 0,
 			'message' => $devices ? 'Consultando pontuações por dispositivo…' : 'Consultando referências do Endpoint Analytics…' ];
 	}
 
 	public function finalize( array $state, array $params ): array {
 		$rows = $state['rows'] ?? [];
-		return [ 'overview' => $state['overview'] ?? null, 'rows' => $rows, 'partial' => ! empty( $state['partial'] ), '_meta' => [ 'rows' => count( $rows ) ] ];
+		return [ 'overview' => $state['overview'] ?? $state['historical'] ?? null, 'rows' => $rows, 'partial' => ! empty( $state['partial'] ),
+			'historyStatus' => $state['history_status'] ?? null, '_meta' => [ 'rows' => count( $rows ) ] ];
 	}
 }

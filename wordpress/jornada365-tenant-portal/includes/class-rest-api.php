@@ -394,7 +394,7 @@ final class Rest_Api {
 		$current = Privacy::uids( (array) Tenant_Repository::get_setting( $tenant ?? [], 'extra_users', [] ) );
 		$patch   = [];
 		$changed = [];
-		foreach ( [ 'auto_approve_intune_apps', 'trust_microsoft_publisher' ] as $k ) {
+		foreach ( [ 'auto_approve_intune_apps', 'trust_microsoft_publisher', 'recognize_windows_components' ] as $k ) {
 			if ( array_key_exists( $k, $body ) ) {
 				$patch[ $k ] = (bool) $body[ $k ];
 				$changed[]   = $k;

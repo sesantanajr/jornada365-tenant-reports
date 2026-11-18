@@ -2,6 +2,7 @@
 namespace J365TP\Reports;
 
 use J365TP\Graph_Exception;
+use J365TP\Intune_Platform;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -42,10 +43,11 @@ final class Managed_Apps extends Intune_App_Report {
 	}
 
 	public function finalize( array $state, array $params ): array {
-		$rows = $state['apps'];
+		$rows = array_values( array_column( $state['apps'], null, 'id' ) );
 		$with_failures = 0;
 		$unknown = 0;
 		foreach ( $rows as &$row ) {
+			$row['platform'] = Intune_Platform::catalog( $row['type'] ?? '' );
 			$row['failedDevices'] = $state['failures'][ $row['id'] ] ?? null;
 			$with_failures += $row['failedDevices'] > 0 ? 1 : 0;
 			$unknown += null === $row['failedDevices'] ? 1 : 0;

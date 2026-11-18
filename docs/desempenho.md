@@ -6,7 +6,8 @@ O Tenant Jornada365 é um portal de código aberto para relatórios de Microsoft
 
 - **Apps descobertos** agrupa o inventário a cada página. A consulta adicional ao catálogo de aplicativos publicados ocorre quando a homologação automática pelo Intune está ativa.
 - **Apps gerenciados** combina o catálogo e o relatório agregado de falhas. Abra um aplicativo para consultar os dispositivos afetados e o código informado pelo Intune. Uma contagem ausente aparece como indisponível.
-- **Atribuições do catálogo** consulta os aplicativos em lotes. Use os filtros de intenção para localizar instalações obrigatórias, instalações opcionais e desinstalações. A lista distingue grupos incluídos, excluídos e alvos que abrangem todo o tenant.
+- **Atribuições do catálogo** combina plataforma, aplicativo, intenção, tipo de destino, destino e cobertura. Por exemplo, escolha *iOS/iPadOS*, *Obrigatória* e *Grupo incluído* para exportar somente as atribuições correspondentes. O tipo de destino diferencia os grupos excluídos e os destinos de todo o tenant. Se o diretório não permite ler o nome do grupo, o relatório conserva o ID. A cobertura distingue aplicativos sem atribuições de consultas incompletas.
+- **Plataforma do catálogo** vem do tipo de aplicativo informado pelo Intune. Aplicativos web genéricos aparecem como *Web*. Um tipo sem plataforma identificável aparece como *Indeterminado*. O relatório busca atribuições em lotes de até 20 aplicativos, acompanha as páginas adicionais e retoma as leituras temporariamente limitadas. [Tipo mobileApp no Graph](https://learn.microsoft.com/graph/api/resources/intune-apps-mobileapp?view=graph-rest-1.0) · [Lotes JSON](https://learn.microsoft.com/graph/json-batching)
 - **Dispositivos** carrega os detalhes de política quando você seleciona um dispositivo com problema de conformidade. Assim, abrir o inventário dispensa uma consulta de políticas para cada dispositivo.
 
 Na validação local com 2.400 versões distribuídas por 100 aplicativos fictícios, as linhas brutas da coleta anterior ocupavam 443.001 bytes em JSON. O estado completo da coleta agrupada ocupou 198.627 bytes, uma redução de 55,2%. Com a homologação automática pelo Intune desabilitada, a consulta ao catálogo foi dispensada. O tempo em um tenant real depende do volume de dados, do tempo de resposta do Graph e dos intervalos de espera indicados pela Microsoft. [Relatórios do Intune](https://learn.microsoft.com/intune/device-management/reports/ref-graph-available-reports) · [Limites do Microsoft Graph](https://learn.microsoft.com/graph/throttling)
@@ -25,6 +26,10 @@ Na validação local com 2.400 versões distribuídas por 100 aplicativos fictí
 - A ordenação calcula uma chave por linha, e a tabela mantém sua rolagem ao ordenar. Em telas estreitas, pesquisa, exportação e paginação podem se reorganizar sem cortar a tabela.
 
 ## Acompanhamento em homologação
+
+Em tabelas com pelo menos 2.000 linhas, a busca prepara um índice em memória quando o leitor entra no campo. O navegador trabalha em pequenos intervalos e reaproveita os resultados quando a palavra é refinada. O índice pertence à tabela da aba e é descartado ao atualizar seus dados. Isso acelera a busca local depois que o relatório chega do Graph.
+
+Quando o Graph informa uma espera, o portal exibe quantas páginas já recebeu e o horário previsto para retomar. O próximo pedido respeita o intervalo indicado pelo serviço. Uma etapa que avançou a paginação pode continuar imediatamente, mesmo quando o contador de linhas exibido ainda é o mesmo.
 
 Abra um relatório com volume representativo de dados, por exemplo o de privilégios e MFA. Registre o tempo total, as solicitações que retornam HTTP 429 e se o progresso volta a avançar depois da espera indicada. Repita com a mesma seleção e o mesmo usuário para comparar alterações. Em uma tela estreita, valide a rolagem da tabela até a última coluna e os controles de pesquisa, filtro e exportação.
 

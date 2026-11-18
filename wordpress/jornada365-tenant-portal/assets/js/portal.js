@@ -83,7 +83,7 @@
       if (!id || job?.job_id !== id || !['pending', 'running', 'done', 'error'].includes(job.status)) {
         throw new Error(t('O servidor devolveu um estado inválido para o relatório.'));
       }
-      onProgress(job);
+      onProgress(job.retryAfter > 0 ? { ...job, resumeAt: Date.now() + job.retryAfter * 1000 } : job);
       if (job.status === 'error') throw Object.assign(new Error(t(job.message || 'Falha ao gerar relatório.')), { failure: job.failure });
       if (job.status === 'done') break;
       if (job.retryAfter > 0) {
@@ -97,7 +97,7 @@
         (seconds) => onProgress({ ...job, message: t('Nova tentativa em {n} s…', { n: seconds }) }),
         opts.signal, 6
       );
-      idle = next?.status === job.status && next.progress === job.progress ? idle + 1 : 0;
+      idle = !next?.advanced && next?.status === job.status && next.progress === job.progress ? idle + 1 : 0;
       job = next;
     }
     const result = await api('jobs/' + id + '/result', opts);
@@ -913,7 +913,7 @@
       state.q = searchText(e.target.value);
       state.page = 0;
       clearTimeout(qTimer);
-      qTimer = setTimeout(() => draw(false), rows.length > 2000 ? 220 : 40);
+      qTimer = setTimeout(() => draw(false), rows.length > 2000 ? 100 : 40);
     } });
     const count = h('span', { class: 'muted small count', role: 'status', 'aria-atomic': 'true' });
     const btnCsv = h('button', { class: 'btn sm', type: 'button', title: 'Exportar os resultados em CSV', onclick: () => exportRows(current(), columns, name, 'csv') }, raw('CSV'));
@@ -949,7 +949,7 @@
       }
     }
     toolbar.append(downloads);
-    const selectedFacets = new Map();
+    const selectedFacets = new Map(facets.filter(f => f.initialValue).map(f => [f.key, String(f.initialValue)]));
     const facetBar = facets.length ? h('div', { class: 'facet-bar', role: 'group', 'aria-label': 'Filtros' }) : null;
     const facetInputs = facets.map(({ key, label }) => {
       const input = h('select', { class: 'j365-input', 'aria-label': label, onchange: () => {
@@ -982,13 +982,53 @@
       if (terms.size < 2048 && key.length < 96) terms.set(key, term);
       return term;
     }
+    let indexed = new WeakMap(), indexChars = 0, nextRow = 0, indexPending = false, lastSearch = null;
+    // Index only after the reader enters search. Small idle slices keep typing and scrolling responsive.
+    function warmIndex() {
+      if (indexPending || rows.length < 2000 || nextRow >= rows.length || indexChars >= 8000000 || !wrap.isConnected) return;
+      indexPending = true;
+      const fill = () => {
+        indexPending = false;
+        if (!wrap.isConnected) return;
+        const until = performance.now() + 5;
+        while (nextRow < rows.length && indexChars < 8000000 && performance.now() < until) {
+          const row = rows[nextRow++], values = [];
+          for (const col of searchable) {
+            values.push(hay(row[col.key]));
+            if (typeof col.value === 'function') values.push(hay(col.value(row)));
+          }
+          const text = values.join('\u0000');
+          indexed.set(row, text);
+          indexChars += text.length;
+        }
+        warmIndex();
+      };
+      if (window.requestIdleCallback) window.requestIdleCallback(fill, { timeout: 180 });
+      else setTimeout(fill, 16);
+    }
+    search.addEventListener('focus', warmIndex);
+    search.addEventListener('input', warmIndex);
+    function matchesText(row) {
+      const known = indexed.get(row);
+      if (known !== undefined) return known.includes(state.q);
+      return searchable.some(col =>
+        hay(row[col.key]).includes(state.q) || (typeof col.value === 'function' && hay(col.value(row)).includes(state.q)));
+    }
     function baseMatches() {
+      // A longer query can only narrow the previous result within the same segment and chip.
+      const scope = JSON.stringify([state.seg, state.filter, state.match?.key, state.match?.value, rows.length]);
+      if (state.q && lastSearch?.scope === scope && state.q.startsWith(lastSearch.q)) {
+        if (state.q !== lastSearch.q) lastSearch = { scope, q: state.q, rows: lastSearch.rows.filter(matchesText) };
+        return lastSearch.rows;
+      }
       let out = base();
       const f = filters.find((x) => x.id === state.filter);
       if (f && f.fn) out = out.filter(f.fn);
       if (state.match) { const { key, value } = state.match; out = out.filter((r) => (Array.isArray(r[key]) ? r[key].includes(value) : r[key] === value)); }
-      if (state.q) out = out.filter(row => searchable.some(col =>
-        hay(row[col.key]).includes(state.q) || (typeof col.value === 'function' && hay(col.value(row)).includes(state.q))));
+      if (state.q) {
+        out = out.filter(matchesText);
+        lastSearch = { scope, q: state.q, rows: out };
+      }
       return out;
     }
     const facetValue = (row, key) => String(row[key] ?? '');
@@ -1040,7 +1080,7 @@
         const n = sg.fn ? rows.filter(sg.fn).length : rows.length;
         if (!n && !sg.always && sg.id !== 'all' && sg.id !== state.seg) continue;
         const on = state.seg === sg.id;
-        segBar.append(h('button', { type: 'button', class: 'seg' + (on ? ' on' : '') + (n ? '' : ' zero'), 'aria-pressed': on ? 'true' : 'false', title: n ? null : t('Nenhum dispositivo desta plataforma neste tenant'), onclick: () => { state.seg = sg.id; state.page = 0; if (segments.onChange) segments.onChange(sg.id); draw(); } }, sg.icon ? sg.icon.cloneNode(true) : null, h('span', null, sg.label), h('span', { class: 'chip-n' }, raw(num(n)))));
+        segBar.append(h('button', { type: 'button', class: 'seg' + (on ? ' on' : '') + (n ? '' : ' zero'), 'aria-pressed': on ? 'true' : 'false', title: n ? null : t('Nenhum registro neste segmento da consulta.'), onclick: () => { state.seg = sg.id; state.page = 0; if (segments.onChange) segments.onChange(sg.id); draw(); } }, sg.icon ? sg.icon.cloneNode(true) : null, h('span', null, sg.label), h('span', { class: 'chip-n' }, raw(num(n)))));
       }
     }
     function drawChips() {
@@ -1163,7 +1203,15 @@
     TABLE_DATA.set(wrap, { rows, columns, name, sheet: sheet ? t(sheet) : '', current: () => current() });
     wrap.setFilter = (id) => { state.filter = id; state.page = 0; draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     wrap.currentRows = () => current();
-    wrap.redraw = () => draw();
+    wrap.redraw = () => {
+      indexed = new WeakMap();
+      indexChars = 0;
+      nextRow = 0;
+      lastSearch = null;
+      lastFacetState = '';
+      draw();
+      if (state.q) warmIndex();
+    };
     wrap.setSegment = (id) => { state.seg = id; state.page = 0; if (segments && segments.onChange) segments.onChange(id); draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     wrap.setMatch = (key, value, label) => {
       state.match = { key, value, label: String(label ?? value) };
@@ -1216,10 +1264,10 @@
     const ul = h('ul', { class: 'bars' });
     BAR_DATA.set(ul, { items: rows, total: denominator, opts });
     for (const [label, v, onclick] of rows) {
-      const width = (100 * v) / (denominator || max);
+      const width = (100 * v) / (opts.relativeToLargest ? max : denominator || max);
       const li = h(onclick ? 'button' : 'li', { class: 'bar-row' + (onclick ? ' link' : ''), type: onclick ? 'button' : null, onclick: onclick || null },
         h('span', { class: 'bl' }, label), h('span', { class: 'bt', 'aria-hidden': 'true' }, h('i', { style: `width:${width}%` })),
-        h('span', { class: 'bv' }, raw((opts.fmt ? opts.fmt(v) : num(v)) + (denominator ? ' · ' + fmtPct(width) : ''))));
+        h('span', { class: 'bv' }, raw((opts.fmt ? opts.fmt(v) : num(v)) + (denominator ? ' · ' + fmtPct(100 * v / denominator) : ''))));
       ul.append(onclick ? h('li', null, li) : li);
     }
     return ul;
@@ -1285,8 +1333,10 @@
     chart.innerHTML = `<svg viewBox="0 0 42 42" aria-hidden="true"><circle class="d-track" cx="21" cy="21" r="15.915"/>${segs.map((sg, i) => `<circle class="d-seg" cx="21" cy="21" r="15.915" pathLength="100" stroke="${sg.color}" stroke-dasharray="${J.RM ? `${sg.len.toFixed(2)} ${(100 - sg.len).toFixed(2)}` : '0 100'}" stroke-dashoffset="${(25 - sg.off).toFixed(2)}" style="--i:${i}"/>`).join('')}</svg>`;
     chart.append(h('div', { class: 'd-center' }, h('b', null, raw(centerText)), centerLabel ? h('span', null, centerLabel) : null));
     const legend = h('ul', { class: 'd-legend' });
+    const share = new Intl.NumberFormat(CFG.intl || 'pt-BR', { style: 'percent', maximumFractionDigits: 1 });
     items.forEach(([label, v, onclick], i) => {
-      const pct = fmtPct(100 * v / base);
+      const fraction = v / base;
+      const pct = fraction < .001 ? '<' + share.format(.001) : (fraction > .999 && fraction < 1 ? '>' + share.format(.999) : share.format(fraction));
       legend.append(h('li', null, h(onclick ? 'button' : 'div', { class: 'd-row' + (onclick ? ' link' : ''), type: onclick ? 'button' : null, onclick: onclick || null },
         h('i', { class: 'd-sw', style: `background:${segs[i].color}` }), h('span', { class: 'dl' }, label), h('span', { class: 'dv' }, raw((fmt ? fmt(v) : num(v)) + ' · ' + pct)))));
     });
@@ -1847,6 +1897,12 @@
     } else if (issue.kind === 'page') {
       content.append(h('button', { class: 'btn sm', type: 'button', onclick: () => location.reload() }, 'Recarregar a página'));
     }
+    if (type === 'devicescore') {
+      for (const advice of deviceScoreAdvice([issue.kind], [issue.section])) {
+        content.append(h('p', null, advice));
+        summary.push(t(advice));
+      }
+    }
     // Sources are static report paths. Service messages can contain a UPN, device name or URL.
     const diagnosis = [];
     if (Number.isInteger(issue.status) && issue.status >= 100 && issue.status <= 599) diagnosis.push('HTTP ' + issue.status);
@@ -1859,7 +1915,7 @@
       graphSource = issue.section?.includes('IdentityRiskEvent.Read.All') ? '/identityProtection/riskDetections' : '/identityProtection/riskyUsers';
     }
     if (type === 'devicescore' && issue.section) {
-      const endpoint = { 'Pontuação do tenant indisponível': 'Overview', 'Referências de comparação indisponíveis': 'Baselines', 'Lista de dispositivos incompleta': 'DeviceScores' }[issue.section];
+      const endpoint = { 'Pontuação do tenant indisponível': 'Overview', 'Referências de comparação indisponíveis': 'Baselines', 'Lista de dispositivos incompleta': 'DeviceScores', 'Histórico de experiência indisponível': 'ScoreHistory' }[issue.section];
       if (endpoint) graphSource = '/deviceManagement/userExperienceAnalytics' + endpoint;
     }
     if (graphSource && ['access', 'license', 'request', 'unavailable', 'authorization'].includes(issue.kind)) diagnosis.push(graphSource);
@@ -1930,7 +1986,10 @@
         }
         const payload = await fetchReport(type, params, force, (job) => {
           if (job.total > 0) { bar.classList.remove('indeterminate'); bar.firstChild.style.width = Math.min(100, Math.round(100 * job.progress / job.total)) + '%'; }
-          status.textContent = job.message ? t(job.message) : t('{n} processados…', { n: num(job.progress) });
+          const message = job.message ? t(job.message) : t('{n} processados…', { n: num(job.progress) });
+          const resume = job.resumeAt && job.waitReason !== 'budget' ? t('Retomada automática às {hora}.', { hora: new Date(job.resumeAt).toLocaleTimeString(CFG.intl || 'pt-BR') }) : '';
+          const pages = job.pagesRead > 0 ? t('Páginas recebidas: {n}.', { n: num(job.pagesRead) }) : '';
+          status.textContent = [message, pages, resume].filter(Boolean).join(' ');
         }, signal);
         bar.style.display = 'none';
         const content = build(payload, ctx);
@@ -1938,7 +1997,8 @@
         const issues = payload._meta?.issues || [];
         const notices = issues.map(i => h('li', null, h('strong', null, i.section), reportNotice(type, i, '', opts.graphSource).content));
         const other = warnings.filter(w => !issues.some(i => w.startsWith(i.section + ':')));
-        const notice = warnings.length || issues.length ? h('div', { class: 'alert warn report-partial' }, h('strong', null, 'Limitações desta consulta'), h('ul', { class: 'list' }, ...notices, ...other.map((w) => h('li', null, w)))) : null;
+        const notice = type === 'devicescore' && issues.length ? deviceScoreCoverage(payload, issues, notices, other)
+          : warnings.length || issues.length ? h('div', { class: 'alert warn report-partial' }, h('strong', null, 'Limitações desta consulta'), h('ul', { class: 'list' }, ...notices, ...other.map((w) => h('li', null, w)))) : null;
         body.replaceChildren(...(notice ? [notice, content] : [content]));
         refreshLabel.textContent = t('Gerar novamente');
         refresh.title = t('Consultar o Microsoft Graph novamente');
@@ -2160,11 +2220,16 @@
       { label: 'Convidados', value: s.guests, onclick: () => table.setFilter('guests') }, { label: 'AD sincronizados', value: s.synced, onclick: () => table.setFilter('synced') }, { label: 'Cloud-only', value: s.cloudOnly, onclick: () => table.setFilter('cloud') },
       { label: 'Licenciados', value: s.licensed, onclick: () => table.setFilter('licensed') }, { label: 'Administradores', value: s.admins, cls: 'danger', onclick: () => table.setFilter('admins') }, { label: 'Nunca logaram', value: sia ? s.neverSignIn : null, cls: 'warn', onclick: sia ? () => table.setFilter('never') : null },
     ]));
-    if (!sia) box.append(h('div', { class: 'alert warn' }, 'Atividade de login indisponível (Entra ID P1/P2 necessário). Colunas de último login ficam vazias.'));
-    box.append(vizRow(
+    if (!sia) box.append(h('div', { class: 'alert warn' }, 'O Entra não retornou a atividade de login. Confira a licença Entra ID P1/P2 e a permissão AuditLog.Read.All. As demais informações de usuários estão disponíveis.'));
+    const accountCharts = vizRow(
       vizCard('Situação das contas', donut([['Habilitadas', s.enabled, () => table.setFilter('enabled'), 'ok'], ['Desabilitadas', s.disabled, () => table.setFilter('disabled'), 'muted']], { centerLabel: t('contas'), key: 'enabled' })),
-      vizCard('Origem das contas', donut([['AD sincronizado', s.synced, () => table.setFilter('synced')], ['Cloud-only', s.cloudOnly, () => table.setFilter('cloud')]], { centerLabel: t('contas'), key: 'source' })),
-      vizCard('Por licença', barList(Object.entries(s.byLicense || {}).map(([k, v]) => [raw(k), v, () => table.setMatch('licenses', k, k)]), s.total, { limit: 8 }))));
+      vizCard('Origem das contas', donut([['AD sincronizado', s.synced, () => table.setFilter('synced')], ['Cloud-only', s.cloudOnly, () => table.setFilter('cloud')]], { centerLabel: t('contas'), key: 'source' })));
+    accountCharts.classList.add('account-charts');
+    const products = Object.entries(s.byLicense || {}).sort((a, b) => b[1] - a[1]);
+    const ranking = vizCard('Por licença', barList(products.map(([k, v]) => [raw(k), v, () => table.setMatch('licenses', k, k)]), s.total, { limit: 8, relativeToLargest: true }));
+    ranking.classList.add('license-ranking');
+    if (products.length) ranking.querySelector('h3')?.after(h('p', { class: 'muted small' }, 'As barras comparam os produtos mais atribuídos. O percentual indica a parcela de todas as contas.'));
+    box.append(accountCharts, ranking);
     box.append(table);
     return box;
   }, { subtitle: 'Consulte as licenças e as funções administrativas de cada usuário. Os dados de último acesso dependem da licença do Entra ID e das permissões de leitura.', graphSource: '/users /subscribedSkus /roleManagement/directory /directoryRoles', ring: (p) => {
@@ -2396,6 +2461,30 @@
     boot: 'Desempenho de inicialização', apps: 'Confiabilidade de aplicativos', work: 'Trabalho de qualquer lugar',
     resources: 'Desempenho de recursos', battery: 'Integridade da bateria', practices: 'Práticas recomendadas',
   };
+  function deviceScoreAdvice(kinds, sections) {
+    const steps = [];
+    if (kinds.includes('unavailable')) steps.push(sections.every(section => section === 'Referências de comparação indisponíveis')
+      ? 'No Intune, abra Endpoint Analytics → Configurações → Referências e confira quais comparações estão disponíveis para a empresa.'
+      : 'No centro de administração do Intune, abra Relatórios → Endpoint Analytics → Visão geral. Confirme a ativação e a atribuição da política de coleta aos dispositivos Windows elegíveis.');
+    if (kinds.includes('consent') || kinds.includes('access')) {
+      steps.push('Confira o consentimento para DeviceManagementManagedDevices.Read.All no aplicativo da empresa conectada.');
+      if ((App.me?.permissions?.mode || CFG.tenancy) === 'per_tenant') steps.push('Para uma função personalizada no Intune, confira Endpoint Analytics/Read, Organization/Read e Managed Devices/Read, além do escopo de dispositivos da conta.');
+    }
+    if (kinds.includes('license')) steps.push('Confirme a licença ativa de Intune. As categorias de bateria e desempenho de recursos dependem do Intune Advanced Analytics.');
+    return steps;
+  }
+  function deviceScoreCoverage(payload, issues, notices, other) {
+    const fromHistory = payload.overview?.source === 'history';
+    const kinds = issues.map(issue => issue.kind);
+    const title = fromHistory ? 'O resumo atual está indisponível. Há uma medição histórica.' : 'Cobertura parcial do Endpoint Analytics';
+    const guidance = deviceScoreAdvice(kinds, issues.map(issue => issue.section));
+    if (payload.historyStatus === 'empty') guidance.unshift('O histórico não retornou uma medição com data e pontuação válidas.');
+    if (payload.historyStatus === 'partial') guidance.unshift('A leitura do histórico terminou antes da última página. A data exibida corresponde à medição mais recente entre os registros recebidos.');
+    const detail = h('details', null, h('summary', null, 'Ver diagnóstico por fonte'), h('ul', { class: 'list' }, ...notices, ...other.map(w => h('li', null, w))));
+    return h('div', { class: 'alert warn report-partial' }, h('strong', null, title),
+      h('ul', { class: 'list' }, ...guidance.map(msg => h('li', null, msg))),
+      h('a', { href: LEARN + 'intune/endpoint-analytics/configure', target: '_blank', rel: 'noopener noreferrer' }, 'Configurar a coleta no Intune'), detail);
+  }
   const deviceScoreState = state => ({
     meetingGoals: ['Dentro da meta', 'ok'], needsAttention: ['Requer atenção', 'warn'],
     insufficientData: ['Dados insuficientes', ''], unknown: ['Estado desconhecido', ''], unknownFutureValue: ['Estado desconhecido', ''],
@@ -2435,10 +2524,17 @@
     const summary = reportPanel('devicescore', {}, 'Score dos dispositivos', p => {
       const base = p.rows || [], org = p.overview, metrics = org?.metrics || [], box = h('div');
       const median = base.find(row => row.builtIn === true);
-      const delta = value => hasDeviceScore(org?.score) && hasDeviceScore(value) ? Number((org.score - value).toFixed(2)) : null;
-      box.append(kpis([{ label: 'Experiência do tenant (0–100)', value: org?.score },
-        { label: 'Mediana das organizações', value: median?.score }, { label: 'Diferença para a mediana (pontos)', value: delta(median?.score) },
-        { label: 'Estado informado', value: org ? t(deviceScoreState(org.state)[0]) : null }]));
+      const historical = org?.source === 'history';
+      const delta = value => !historical && hasDeviceScore(org?.score) && hasDeviceScore(value) ? Number((org.score - value).toFixed(2)) : null;
+      const cards = [
+        hasDeviceScore(org?.score) && { label: historical ? 'Pontuação histórica (0–100)' : 'Experiência do tenant (0–100)', value: org.score },
+        historical && { label: 'Data da medição', value: fmtDate(org.measuredAt) },
+        hasDeviceScore(median?.score) && { label: 'Mediana das organizações', value: median.score },
+        delta(median?.score) !== null && { label: 'Diferença para a mediana (pontos)', value: delta(median.score) },
+        org?.state && { label: 'Estado informado', value: t(deviceScoreState(org.state)[0]) },
+      ].filter(Boolean);
+      if (!org) box.append(h('p', { class: 'muted' }, base.length ? 'O Intune retornou apenas referências de comparação para este resumo.' : 'Ainda não há uma pontuação da organização para exibir. Você pode consultar os dispositivos separadamente.'));
+      if (cards.length) box.append(kpis(cards));
       if (org?.state === 'insufficientData') box.append(h('p', { class: 'alert info' }, 'O Intune indicou dados insuficientes. Para um score significativo, a Microsoft exige pelo menos cinco dispositivos com dados reportados.'));
       const valid = metrics.filter(row => hasDeviceScore(row.score));
       if (valid.length) {
@@ -2449,17 +2545,18 @@
           h('i', { 'aria-hidden': 'true' }, h('b', { style: 'width:' + score + '%' })), h('strong', null, raw(num(score)))));
         box.append(h('h3', null, 'Experiência por categoria'), plot);
       }
-      box.append(DataTable({ rows: metrics, name: 'metricas-experiencia', sheet: 'Métricas de experiência', compact: true, columns: [
+      if (metrics.length) box.append(DataTable({ rows: metrics, name: 'metricas-experiencia', sheet: 'Métricas de experiência', compact: true, columns: [
         { key: 'metric', label: 'Categoria', render: row => t(DEVICE_SCORE_METRICS[row.metric] || row.metric), export: row => t(DEVICE_SCORE_METRICS[row.metric] || row.metric) },
-        scoreColumn('score', 'Pontuação (0–100)'), scoreStateColumn,
+        scoreColumn('score', 'Pontuação (0–100)'), ...(historical ? [{ key: 'measuredAt', label: 'Data da medição', render: () => fmtDate(org.measuredAt), export: () => org.measuredAt }] : [scoreStateColumn]),
       ], emptyText: org ? 'O Intune não publicou métricas por categoria nesta consulta.' : 'As métricas do tenant estão indisponíveis.' }));
-      box.append(h('h3', null, 'Referências de comparação'), DataTable({ rows: base, name: 'referencias-experiencia', sheet: 'Referências do Intune', compact: true,
+      if (base.length) box.append(h('h3', null, 'Referências de comparação'), DataTable({ rows: base, name: 'referencias-experiencia', sheet: 'Referências do Intune', compact: true,
         emptyText: p.partial ? 'As referências do Intune estão indisponíveis nesta consulta.' : 'O Intune não retornou referências de comparação.', columns: [
           { key: 'name', label: 'Nome' }, { key: 'builtIn', label: 'Tipo', render: row => row.builtIn === true ? t('Mediana das organizações') : row.builtIn === false ? t('Referência personalizada') : '—',
             export: row => row.builtIn === true ? t('Mediana das organizações') : row.builtIn === false ? t('Referência personalizada') : null },
-          scoreColumn('score', 'Referência (pontos)'), { key: 'delta', label: 'Diferença do tenant (pontos)', render: row => raw(num(delta(row.score))), export: row => delta(row.score) },
+          scoreColumn('score', 'Referência (pontos)'), ...(!historical && hasDeviceScore(org?.score) ? [{ key: 'delta', label: 'Diferença do tenant (pontos)', render: row => raw(num(delta(row.score))), export: row => delta(row.score) }] : []),
           { key: 'created', label: 'Criado em', render: row => row.builtIn ? '—' : fmtDate(row.created), export: row => row.builtIn ? null : row.created },
         ] }));
+      else if (org && !p.partial) box.append(h('p', { class: 'muted small' }, 'O Intune não retornou referências de comparação.'));
       return box;
     }, { subtitle: 'Experiência dos dispositivos Windows segundo o Intune Endpoint Analytics, de 0 a 100 pontos. Valores maiores indicam melhor experiência.', icon: 'gauge',
       graphSource: '/deviceManagement/userExperienceAnalyticsOverview /deviceManagement/userExperienceAnalyticsBaselines',
@@ -2571,28 +2668,49 @@
   };
 
   /* Apps */
+  function discoveredFamily(r) {
+    if (r.family) return r.family;
+    const rawPlatform = String(r.platform || '').toLowerCase();
+    return ({ ios: 'iOS/iPadOS', ipados: 'iOS/iPadOS', macos: 'macOS', linux: 'Linux', chromeos: 'Chrome OS' })[rawPlatform]
+      || (rawPlatform.startsWith('windows') ? 'Windows' : rawPlatform.startsWith('android') ? 'Android' : 'unknown');
+  }
+
+  function appIntents(r) {
+    return (r.intents || []).map(v => t(INTUNE_INTENTS[v] || v)).join(', ');
+  }
+
   views.apps = () => reportPanel('apps', {}, 'Aplicativos descobertos e homologação', (p) => {
     const s = p.summary, box = h('div');
     const cols = [
-      { key: 'name', label: 'Aplicativo' }, { key: 'publisher', label: 'Publisher' }, { key: 'platform', label: 'Plataforma' },
-      { key: 'approved', label: 'Homologado', render: (r) => r.approvalKnown === false ? badge('Indeterminado', 'warn') : r.approved ? badge('Sim', 'ok') : badge('Não', 'danger'), export: (r) => r.approvalKnown === false ? t('Indeterminado') : r.approved }, { key: 'approvedBy', label: 'Critério', wrap: true },
-      { key: 'deviceCount', label: 'Dispositivos', render: (r) => num(r.deviceCount) }, { key: 'versionCount', label: 'Versões' }, { key: 'latestVersion', label: 'Versão mais recente' },
+      { key: 'name', label: 'Aplicativo' }, { key: 'publisher', label: 'Publisher' }, { key: 'family', label: 'Plataforma', value: discoveredFamily },
+      { key: 'approved', label: 'Homologado', render: (r) => r.approvalKnown === false ? badge('Indeterminado', 'warn') : r.approved ? badge('Sim', 'ok') : badge('Não', 'danger'), export: (r) => r.approvalKnown === false ? t('Indeterminado') : r.approved }, { key: 'approvedBy', label: 'Critério', value: r => t(r.approvedBy || r.scopeNote || ''), wrap: true },
+      { key: 'intents', label: 'Intenções incluídas', value: appIntents }, { key: 'catalogApp', label: 'Aplicativo no catálogo' }, { key: 'identity', label: 'Evidência de identidade', value: r => t(r.identity || '') },
+      { key: 'scopeNote', label: 'Cobertura da atribuição', value: r => t(r.scopeNote || ''), wrap: true }, { key: 'platform', label: 'Plataforma informada pelo Graph' },
+      { key: 'deviceCount', label: 'Instalações informadas', render: (r) => r.deviceCount == null ? '—' : num(r.deviceCount) }, { key: 'versionCount', label: 'Versões' }, { key: 'latestVersion', label: 'Versão mais recente' },
       { key: 'versions', label: 'Versões (dispositivos)', render: (r) => list(r.versions.map((v) => `${v.version} (${v.devices})`), 3), export: (r) => r.versions.map((v) => `${v.version} (${v.devices})`), wrap: true },
     ];
     const table = DataTable({ rows: p.rows, columns: cols, name: 'aplicativos', onRowClick: (r) => appDetail(r), filters: [
       { id: 'notapproved', label: 'Não homologados', fn: (r) => !r.approved && r.approvalKnown !== false }, { id: 'approved', label: 'Homologados', fn: (r) => r.approved }, { id: 'multi', label: 'Múltiplas versões', fn: (r) => r.versionCount > 1 },
       s.unknown ? { id: 'unknown', label: 'Indeterminado', fn: (r) => r.approvalKnown === false } : null,
-      { id: 'win', label: 'Windows', fn: (r) => r.platform === 'windows' }, { id: 'mac', label: 'macOS', fn: (r) => r.platform === 'macOS' }, { id: 'ios', label: 'iOS', fn: (r) => r.platform === 'iOS' }, { id: 'android', label: 'Android', fn: (r) => /android/i.test(r.platform) },
+      { id: 'win', label: 'Windows', fn: (r) => discoveredFamily(r) === 'Windows' }, { id: 'mac', label: 'macOS', fn: (r) => discoveredFamily(r) === 'macOS' }, { id: 'ios', label: 'iOS/iPadOS', fn: (r) => discoveredFamily(r) === 'iOS/iPadOS' }, { id: 'android', label: 'Android', fn: (r) => discoveredFamily(r) === 'Android' },
     ] });
     box.append(kpis([
       { label: 'Aplicativos únicos', value: s.apps }, { label: 'Entradas (app+versão)', value: s.entries }, { label: 'Homologados', value: s.approved, cls: 'ok', onclick: () => table.setFilter('approved') }, { label: 'Não homologados', value: s.notApproved, cls: 'danger', onclick: () => table.setFilter('notapproved') },
-      { label: 'Via Intune', value: s.approvedIntune }, { label: 'Via allowlist', value: s.approvedAllowlist }, { label: 'Via publisher', value: s.approvedPublisher }, { label: 'Múltiplas versões', value: s.multiVersion, cls: 'warn', onclick: () => table.setFilter('multi') }, { label: 'Catálogo Intune', value: s.intuneCatalog },
+      { label: 'Via Intune', value: s.approvedIntune }, { label: 'Via allowlist', value: s.approvedAllowlist }, { label: 'Componentes Windows', value: s.approvedComponent }, { label: 'Via publisher', value: s.approvedPublisher }, { label: 'Indeterminado', value: s.unknown }, { label: 'Catálogo Intune', value: s.intuneCatalog },
     ]));
-    box.append(h('div', { class: 'alert' }, 'Homologação por nome no catálogo publicado do Intune ', p.settings.auto_approve_intune_apps ? badge('ativo', 'ok') : badge('desativado', 'warn'), ' · (2) regra na allowlist do tenant · (3) publisher Microsoft ', p.settings.trust_microsoft_publisher ? badge('ativo', 'ok') : badge('desativado', 'warn'), '. Ajuste em Configurações.'));
+    box.append(h('p', { class: 'muted small' }, 'A homologação considera as regras do tenant, componentes Windows reconhecidos e inclusões obrigatórias ou disponíveis. Uma inclusão descreve o público configurado. A instalação em cada dispositivo depende do grupo, dos filtros e das exclusões.'));
+    if (s.catalogState === 'partial' || s.assignmentUnknown || s.packageUnavailable) box.append(h('div', { class: 'alert warn' }, 'A consulta ao catálogo, aos identificadores de pacote ou às atribuições retornou dados parciais. Consulte o critério e a cobertura de cada aplicativo.'));
+    if (!p.rows.length) box.append(h('div', { class: 'alert' }, 'O Intune não retornou aplicativos descobertos para esta consulta. O catálogo gerenciado pode conter produtos ainda sem inventário.'));
+    const iosDetected = p.rows.filter(r => discoveredFamily(r) === 'iOS/iPadOS').length;
+    const iosCatalog = s.catalogState === 'complete' ? num(s.catalogByPlatform?.['iOS/iPadOS'] || 0) : t(s.catalogState === 'disabled' ? 'Não consultado' : 'Indeterminado');
+    box.append(h('div', { class: 'panel' }, h('h3', null, 'Inventário iOS/iPadOS'),
+      h('p', null, raw(t('{detected} descobertos no inventário · {catalog} no catálogo.', { detected: num(iosDetected), catalog: iosCatalog }))),
+      h('p', { class: 'muted small' }, 'Em dispositivos pessoais, o Intune informa somente apps gerenciados. O inventário iOS/iPadOS é atualizado normalmente a cada sete dias.'),
+      App.me.reports.includes('managed_apps') ? h('button', { type: 'button', class: 'btn sm', onclick: () => { App.params.managedPlatform = 'iOS/iPadOS'; App.go('managed_apps'); } }, 'Abrir catálogo iOS/iPadOS') : null));
     if (p.rows.length) {
       box.append(vizRow(
-        vizCard('Homologação', donut([['Homologados', s.approved, () => table.setFilter('approved'), 'ok'], ['Não homologados', s.notApproved, () => table.setFilter('notapproved'), 'danger']], { centerLabel: t('aplicativos'), key: 'approved' })),
-        vizCard('Por plataforma', donut(countBy(p.rows, (r) => r.platform, { limit: 6 }).map(([l, v]) => [l, v]), { centerLabel: t('aplicativos'), key: 'platform' })),
+        vizCard('Homologação', donut([['Homologados', s.approved, () => table.setFilter('approved'), 'ok'], ['Não homologados', s.notApproved, () => table.setFilter('notapproved'), 'danger'], ['Indeterminado', s.unknown || 0, () => table.setFilter('unknown'), 'warn']], { centerLabel: t('aplicativos'), key: 'approved' })),
+        vizCard('Por plataforma', donut(countBy(p.rows, discoveredFamily, { limit: 6 }).map(([l, v]) => [l, v]), { centerLabel: t('aplicativos'), key: 'platform' })),
         vizCard('Mais instalados', barList(p.rows.slice(0, 8).map((r) => [raw(r.name), r.deviceCount, () => appDetail(r)]), 0))));
     }
     box.append(table);
@@ -2604,7 +2722,7 @@
 
   function appDetail(r) {
     const body = h('div');
-    body.append(kv([['Publisher', r.publisher], ['Plataforma', r.platform], ['Homologado', r.approvalKnown === false ? t('Indeterminado') : r.approved ? t('Sim') + ' — ' + t(r.approvedBy) : t('Não')], ['Dispositivos (soma das versões)', num(r.deviceCount)]]));
+    body.append(kv([['Publisher', r.publisher], ['Plataforma', discoveredFamily(r)], ['Plataforma informada pelo Graph', r.platform], ['Homologado', r.approvalKnown === false ? t('Indeterminado') : r.approved ? t('Sim') + ' — ' + t(r.approvedBy) : t('Não')], ['Aplicativo no catálogo', r.catalogApp], ['Evidência de identidade', t(r.identity || '')], ['Intenções incluídas', appIntents(r)], ['Cobertura da atribuição', t(r.scopeNote || '')], ['Dispositivos (soma das versões)', r.deviceCount == null ? '—' : num(r.deviceCount)]]));
     body.append(h('h3', { style: 'margin-top:14px' }, 'Versões'));
     body.append(DataTable({ rows: r.versions, name: 'app-versoes', sheet: 'Versões', pageSize: 10, compact: true, columns: [
       { key: 'version', label: 'Versão' }, { key: 'devices', label: 'Dispositivos' },
@@ -2619,7 +2737,7 @@
     }
     const actions = h('div', { class: 'actions' },
       ...batches,
-      !r.approved && App.me.user?.can?.manageApps ? h('button', { class: 'btn', onclick: async () => { try { await api('allowlist', { method: 'POST', body: { app_name: r.name, publisher: '', platform: r.platform, match_type: 'exact', notes: 'Adicionado pelo relatório' } }); delete App.cache['apps{}']; m.remove(); App.go('apps'); } catch (e) { alert(e.message); } } }, 'Homologar (adicionar à allowlist)') : null
+      !r.approved && App.me.user?.can?.manageApps ? h('button', { class: 'btn', onclick: async () => { try { await api('allowlist', { method: 'POST', body: { app_name: r.name, publisher: r.publisher || '', platform: r.platform, match_type: 'exact', notes: 'Adicionado pelo relatório' } }); delete App.cache['apps{}']; m.remove(); App.go('apps'); } catch (e) { alert(e.message); } } }, 'Homologar (adicionar à allowlist)') : null
     );
     body.append(actions);
     const devOut = h('div');
@@ -2652,20 +2770,40 @@
     allDevicesAssignmentTarget: 'Todos os dispositivos', configurationManagerCollectionAssignmentTarget: 'Coleção do Configuration Manager',
   };
   const INTUNE_PUBLISHING = { published: 'Publicado', processing: 'Em processamento', notPublished: 'Não publicado' };
+  function catalogPlatform(row) {
+    if (row.platform && row.platform !== 'unknown') return row.platform;
+    // Reports already delivered to this tab before the upgrade only contain the Graph subtype.
+    const type = String(row.type || row.appType || '').replace(/^#?microsoft\.graph\./i, '').toLowerCase();
+    const family = type.match(/^(?:managed)?(windows|win32|winget|ios|macos|android|linux|chromeos)/)?.[1] || type;
+    return ({ windows: 'Windows', win32: 'Windows', winget: 'Windows', officesuiteapp: 'Windows', microsoftstoreforbusinessapp: 'Windows',
+      ios: 'iOS/iPadOS', macos: 'macOS', android: 'Android', linux: 'Linux', chromeos: 'Chrome OS', webapp: 'Web' })[family] || t('Indeterminado');
+  }
 
-  function managedAppPanel(type, params) {
+  function managedAppPanel(type, params, app) {
     const global = type === 'intune_assignments';
     const assignments = global || type === 'app_assignments';
     const title = global ? 'Atribuições do catálogo' : APP_REPORT_TITLES[type];
     const coverage = { assignment: 'Atribuição confirmada', none: 'Sem atribuições', unavailable: 'Consulta incompleta' };
     const label = (values, key) => t(values[key] || key || 'Indeterminado');
     return reportPanel(type, params, title, (p) => {
+      const rows = assignments ? p.rows.map(r => {
+        const applies = !r.coverage || r.coverage === 'assignment';
+        const group = r.target === 'groupAssignmentTarget' || r.target === 'exclusionGroupAssignmentTarget';
+        const targetKind = applies ? label(INTUNE_TARGETS, r.target) : '';
+        return { ...r, platformLabel: catalogPlatform(app || r),
+          intentLabel: applies ? label(INTUNE_INTENTS, r.intent) : '', targetKind,
+          targetName: group ? (r.groupName || [t('Grupo sem nome visível'), r.groupId].filter(Boolean).join(' · ')) :
+            r.collectionId ? r.collectionId : targetKind,
+          coverageLabel: label(coverage, r.coverage || 'assignment') };
+      }) : p.rows;
       const columns = assignments ? [
-        ...(global ? [{ key: 'appName', label: 'Aplicativo' }, { key: 'appId', label: 'ID do aplicativo' }, { key: 'coverage', label: 'Cobertura', value: (r) => label(coverage, r.coverage) }] : []),
-        { key: 'intent', label: 'Intenção', value: (r) => r.coverage === 'none' ? '—' : label(INTUNE_INTENTS, r.intent) },
-        { key: 'target', label: 'Alvo', value: (r) => r.coverage === 'none' ? '—' : label(INTUNE_TARGETS, r.target) },
-        { key: 'groupName', label: 'Nome do grupo', value: (r) => r.groupId && !r.groupName ? t('Nome indisponível') : r.groupName },
-        { key: 'groupId', label: 'ID do grupo' }, { key: 'collectionId', label: 'ID da coleção' },
+        ...(global ? [{ key: 'appName', label: 'Aplicativo' }] : []),
+        ...(global || app ? [{ key: 'platformLabel', label: 'Plataforma' }] : []),
+        { key: 'intentLabel', label: 'Intenção' }, { key: 'targetKind', label: 'Tipo de destino' },
+        { key: 'targetName', label: 'Destino', wrap: true },
+        ...(global ? [{ key: 'coverageLabel', label: 'Cobertura' }, { key: 'appId', label: 'ID do aplicativo', exportOnly: true }, { key: 'appType', label: 'Tipo do catálogo (Graph)', exportOnly: true }] : []),
+        { key: 'groupName', label: 'Nome do grupo', exportOnly: true },
+        { key: 'groupId', label: 'ID do grupo' }, { key: 'collectionId', label: 'ID da coleção', exportOnly: true },
         { key: 'filterType', label: 'Modo do filtro', value: (r) => ({ include: t('Inclusão'), exclude: t('Exclusão'), none: '—' })[r.filterType] || r.filterType },
         { key: 'filterId', label: 'ID do filtro' }, { key: 'id', label: 'ID da atribuição', exportOnly: true },
       ] : [
@@ -2674,11 +2812,13 @@
         { key: 'code', label: 'Código de erro' }, { key: 'detail', label: 'Detalhes' }, { key: 'version', label: 'Versão' },
         { key: 'modified', label: 'Última atualização', render: (r) => fmtDate(r.modified) },
       ];
-      return DataTable({ rows: p.rows, columns, name: global ? type : type + '-' + params.id, sheet: title, pageSize: 25,
+      return DataTable({ rows, columns, name: global ? type : type + '-' + params.id, sheet: title, pageSize: 25,
         emptyText: global ? 'Nenhum registro.' : assignments ? 'O Intune não retornou atribuições para este aplicativo.' : 'Nenhuma falha identificada nos registros retornados pelo Intune.',
-        filters: assignments ? [...Object.entries(INTUNE_INTENTS).map(([id, text]) => ({ id, label: text, fn: (r) => r.intent === id })),
-          ...(global ? ['none', 'unavailable'].map((id) => ({ id, label: coverage[id], fn: (r) => r.coverage === id })) : [])] : [],
-        facets: global ? [{ key: 'target', label: 'Alvo' }, { key: 'groupName', label: 'Nome do grupo' }] : [],
+        facets: assignments ? [
+          ...(global ? [{ key: 'platformLabel', label: 'Plataforma' }, { key: 'appName', label: 'Aplicativo' }] : []),
+          { key: 'intentLabel', label: 'Intenção' }, { key: 'targetKind', label: 'Tipo de destino' },
+          { key: 'targetName', label: 'Destino' }, ...(global ? [{ key: 'coverageLabel', label: 'Cobertura' }] : []),
+        ] : [],
       });
     }, { icon: assignments ? 'users' : 'device', subtitle: global ? 'Consulte os aplicativos e seus destinos por intenção de implantação. Os grupos excluídos aparecem como alvos separados.' : params.name || params.id });
   }
@@ -2686,23 +2826,29 @@
   views.intune_assignments = () => managedAppPanel('intune_assignments', {});
 
   views.managed_apps = () => reportPanel('managed_apps', {}, 'Apps gerenciados', (p) => {
-    const open = (type, r) => modal(r.name || r.id, managedAppPanel(type, { id: r.id, name: r.name.slice(0, 200) }));
+    const open = (type, r) => modal(r.name || r.id, managedAppPanel(type, { id: r.id, name: (r.name || '').slice(0, 200) }, r));
     const appLink = (type, r, text, action) => {
       const title = t(action, { s: r.name || r.id });
       const count = type === 'app_failures';
       const label = count ? text + ' · ' + title : title;
       return h('button', { type: 'button', class: 'dt-drill' + (count && r.failedDevices > 0 ? ' has-failures' : ''), 'aria-label': label, title: label, onclick: () => open(type, r) }, raw(text));
     };
-    const table = DataTable({ rows: p.rows, name: 'intune-apps', sheet: 'Apps gerenciados', columns: [
+    const rows = p.rows.map(r => ({ ...r, platformLabel: catalogPlatform(r),
+      stateLabel: t(INTUNE_PUBLISHING[r.state] || r.state || 'Indeterminado') }));
+    const platform = App.params.managedPlatform;
+    delete App.params.managedPlatform;
+    const table = DataTable({ rows, name: 'intune-apps', sheet: 'Apps gerenciados', columns: [
       { key: 'name', label: 'Aplicativo', render: (r) => appLink('app_assignments', r, r.name || r.id, 'Ver atribuições de {s}') },
       { key: 'failedDevices', label: 'Falhas', xlLabel: 'Dispositivos com falhas', sortValue: (r) => r.failedDevices,
         render: (r) => appLink('app_failures', r, r.failedDevices == null ? t('Sem contagem') : num(r.failedDevices), 'Ver falhas de {s}'),
         export: (r) => r.failedDevices ?? t('Sem contagem') },
+      { key: 'platformLabel', label: 'Plataforma' },
       { key: 'publisher', label: 'Publisher' },
-      { key: 'type', label: 'Tipo' }, { key: 'state', label: 'Publicação', value: (r) => t(INTUNE_PUBLISHING[r.state] || r.state || 'Indeterminado') },
+      { key: 'type', label: 'Tipo do catálogo (Graph)' }, { key: 'stateLabel', label: 'Publicação' },
       { key: 'modified', label: 'Última atualização', render: (r) => fmtDate(r.modified) },
       { key: 'id', label: 'ID do aplicativo', exportOnly: true },
-    ], filters: [
+    ], facets: [{ key: 'platformLabel', label: 'Plataforma', initialValue: platform === 'unknown' ? t('Indeterminado') : platform },
+      { key: 'stateLabel', label: 'Publicação' }, { key: 'publisher', label: 'Publisher' }], filters: [
       { id: 'failed', label: 'Com falhas', fn: (r) => r.failedDevices > 0 },
       { id: 'zero', label: 'Zero falhas', fn: (r) => r.failedDevices === 0 },
       { id: 'unknown', label: 'Sem contagem', fn: (r) => r.failedDevices == null },
@@ -3190,13 +3336,40 @@
 
   function scoreArchiveControls(tenantId, graph, end, refresh, stored) {
     const format = 'j365.identity-score.v1', notice = h('p', { class: 'muted small', role: 'status' });
-    const picker = h('input', { type: 'file', multiple: true, accept: '.json,application/json', 'aria-label': 'Importar arquivo de histórico' });
+    const picker = h('input', { type: 'file', multiple: true, accept: '.json,.csv,application/json,text/csv', 'aria-label': 'Importar arquivo de histórico' });
+    function checkTenant(id) {
+      if (typeof id !== 'string' || id.toLowerCase() !== tenantId) throw new Error('Este arquivo pertence a outro tenant.');
+    }
+    function csvDays(source) {
+      const lines = source.trim().split(/\r?\n/);
+      if (lines.length < 2 || lines.length > 1001) throw new Error('Arquivo de histórico inválido.');
+      const separator = lines[0].includes(';') ? ';' : ',';
+      // These four identity, date and integer fields never contain a delimiter or a newline.
+      const fields = line => line.split(separator).map(s => s.trim().replace(/^"([^"]*)"$/, '$1'));
+      const header = fields(lines.shift());
+      const expected = ['tenantId', 'createDateTime', 'tenantScore', 'tenantMaxScore'];
+      if (header.length !== 4 || !expected.every(key => header.includes(key))) throw new Error('Cabeçalho CSV de pontuação inválido.');
+      return lines.map(line => {
+        const values = fields(line);
+        if (values.length !== 4) throw new Error('Arquivo de histórico inválido.');
+        const [id, date, current, max] = expected.map(key => values[header.indexOf(key)]);
+        checkTenant(id);
+        if (!/^\d+$/.test(current) || !/^\d+$/.test(max)) throw new Error('Arquivo de histórico inválido.');
+        return { date, current: Number(current), max: Number(max) };
+      });
+    }
     async function read(file) {
       if (file.size > 1024 * 1024) throw new Error('Arquivo de histórico inválido.');
-      const data = JSON.parse(await file.text());
-      if (data?.format !== format || !Array.isArray(data.observations) || data.observations.length > 1000) throw new Error('Arquivo de histórico inválido.');
-      if (typeof data.tenantId !== 'string' || data.tenantId.toLowerCase() !== tenantId) throw new Error('Este arquivo pertence a outro tenant.');
-      return data.observations.map((d) => {
+      const source = (await file.text()).replace(/^\uFEFF/, '');
+      let observations;
+      if (/\.csv$/i.test(file.name)) observations = csvDays(source);
+      else {
+        const data = JSON.parse(source);
+        if (data?.format !== format || !Array.isArray(data.observations) || data.observations.length > 1000) throw new Error('Arquivo de histórico inválido.');
+        checkTenant(data.tenantId);
+        observations = data.observations;
+      }
+      return observations.map((d) => {
         const date = scoreStamp(d?.date);
         if (!date || date > new Date().toISOString() || date.slice(0, 10) > end || scorePercent(d) == null) throw new Error('Arquivo de histórico inválido.');
         return { date, current: d.current, max: d.max };
@@ -3225,7 +3398,8 @@
       const a = h('a', { href: url, download: 'identity-score-' + end + '.json' });
       document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
     };
-    return h('details', { class: 'score-archive' }, h('summary', null, 'Histórico em arquivo local'), h('p', null, 'Selecione um ou mais arquivos JSON de histórico deste tenant. O portal reúne os dias válidos dos últimos 24 meses nesta aba. Você pode salvar o resultado em um único arquivo.'),
+    return h('details', { class: 'score-archive' }, h('summary', null, 'Histórico em arquivo local'), h('p', null, 'Importe arquivos JSON do portal ou medições anteriores em CSV. Cada linha do CSV deve conter o ID deste tenant, a data e os pontos medidos.'),
+      h('code', null, raw('tenantId,createDateTime,tenantScore,tenantMaxScore')),
       h('div', { class: 'actions' }, h('button', { class: 'btn sm', type: 'button', onclick: save }, 'Salvar histórico em JSON'), h('label', null, h('span', null, 'Importar arquivo de histórico'), picker)), notice);
   }
 
@@ -3320,7 +3494,10 @@
       const scope = t('Janela de {start} a {end} (UTC).', { start: info.months[0].month, end: info.months.at(-1).month });
       const direct = info.sources[0];
       const observed = direct.days ? t('Medições do Graph de {start} a {end} (UTC).', { start: fmtDay(direct.first), end: fmtDay(direct.last) }) : t('A consulta ao Graph não retornou uma medição válida nesse período.');
-      body.append(monthlyScoreChart(info.months), h('div', { class: 'score-coverage' }, h('p', { class: 'muted small' }, raw(scope + ' ' + coverage + ' ' + observed)),
+      if (covered.length < count) body.append(h('div', { class: 'score-coverage-note' }, icon('clock'), h('div', null, h('strong', null, raw(coverage)),
+        h('p', null, raw(observed), ' ', 'O Entra não garante 12 ou 24 meses retroativos. Para completar os meses anteriores, importe medições já arquivadas pela empresa.', ' ',
+          p.tracking?.enabled ? 'O histórico do portal está ativo.' : 'O administrador do tenant pode ativar o histórico do portal para guardar as próximas medições.'))));
+      body.append(monthlyScoreChart(info.months), h('div', { class: 'score-coverage' }, h('p', { class: 'muted small' }, raw(covered.length < count ? scope : scope + ' ' + coverage + ' ' + observed)),
         covered.length < count && archivePanel ? h('button', { type: 'button', class: 'btn sm', onclick: () => { archivePanel.open = true; archivePanel.querySelector('input').focus(); } }, 'Complementar com arquivos anteriores') : null));
       body.append(h('h3', null, monthTitle), DataTable({ rows: [...info.months].reverse(), name: 'identity-score-monthly', sheet: monthTitle, columns: [{ key: 'month', label: title }, ...columns, { key: 'samples', label: 'Dias com medição' }] }));
       const coverageColumns = [{ key: 'source', label: 'Origem da medição', value: r => t(r.source) },
@@ -4187,14 +4364,16 @@
     /* App homologation */
     const auto = h('input', { type: 'checkbox', checked: !!st.auto_approve_intune_apps, disabled: !can.manageApps });
     const ms = h('input', { type: 'checkbox', checked: !!st.trust_microsoft_publisher, disabled: !can.manageApps });
+    const components = h('input', { type: 'checkbox', checked: st.recognize_windows_components !== false, disabled: !can.manageApps });
     const msg = h('div');
     const save = h('button', { class: 'btn primary', disabled: !can.manageApps, onclick: async () => {
-      try { const r = await api('tenant/settings', { method: 'PATCH', body: { auto_approve_intune_apps: auto.checked, trust_microsoft_publisher: ms.checked } }); App.me.tenant.settings = r.settings; delete App.cache['apps{}']; result(msg, true, 'Salvo.'); } catch (e) { result(msg, false, e.message); }
+      try { const r = await api('tenant/settings', { method: 'PATCH', body: { auto_approve_intune_apps: auto.checked, trust_microsoft_publisher: ms.checked, recognize_windows_components: components.checked } }); App.me.tenant.settings = r.settings; delete App.cache['apps{}']; result(msg, true, 'Salvo.'); } catch (e) { result(msg, false, e.message); }
     } }, 'Salvar');
     box.append(h('div', { class: 'panel' }, h('h2', null, 'Homologação de aplicativos'),
       can.manageApps ? null : note('Somente Global Administrator, Intune Administrator ou Security Administrator (atribuição ativa) podem alterar as regras de homologação.'),
-      h('label', { class: 'check-row' }, auto, h('span', null, 'Homologar por correspondência de nome com um aplicativo publicado no catálogo do Intune')),
-      h('label', { class: 'check-row' }, ms, h('span', null, 'Considerar homologados os aplicativos cujo publisher começa com "Microsoft"')),
+      h('label', { class: 'check-row' }, auto, h('span', null, 'Homologar produtos identificados com uma atribuição de inclusão obrigatória ou disponível no Intune')),
+      h('label', { class: 'check-row' }, components, h('span', null, 'Homologar componentes Windows reconhecidos pelo produto e pelo editor Microsoft informado')),
+      h('label', { class: 'check-row' }, ms, h('span', null, 'Homologar os demais aplicativos com editor Microsoft reconhecido')),
       h('div', { class: 'actions' }, save), msg));
 
     /* Additional users (stored only as keyed pseudonyms) */
@@ -4260,7 +4439,7 @@
     const form = h('form', { class: 'inline', onsubmit: async (e) => { e.preventDefault(); const fd = Object.fromEntries(new FormData(form).entries()); try { await api('allowlist', { method: 'POST', body: fd }); form.reset(); delete App.cache['apps{}']; loadRules(); } catch (err) { alert(err.message); } } },
       h('label', null, 'Nome / padrão', h('input', { name: 'app_name', class: 'j365-input', required: true, maxlength: 200, style: 'min-width:260px' })),
       h('label', null, 'Publisher (opcional, contém)', h('input', { name: 'publisher', class: 'j365-input', maxlength: 200 })),
-      h('label', null, 'Plataforma', h('select', { name: 'platform', class: 'j365-input' }, ...['any', 'windows', 'macOS', 'iOS', 'androidOSP', 'other'].map((p) => h('option', { value: p }, p === 'any' ? 'Qualquer' : p)))),
+      h('label', null, 'Plataforma', h('select', { name: 'platform', class: 'j365-input' }, ...['any', 'windows', 'windowsMobile', 'windowsHolographic', 'macOS', 'iOS', 'iPadOS', 'androidOSP', 'androidDeviceAdministrator', 'androidWorkProfile', 'androidDedicatedAndFullyManaged', 'chromeOS', 'linux', 'other', 'unknown', 'unknownFutureValue'].map((p) => h('option', { value: p }, p === 'any' ? 'Qualquer' : p)))),
       h('label', null, 'Correspondência', h('select', { name: 'match_type', class: 'j365-input' }, h('option', { value: 'exact' }, 'Exata'), h('option', { value: 'contains' }, 'Contém'), h('option', { value: 'prefix' }, 'Prefixo'), h('option', { value: 'regex' }, 'Regex'))),
       h('label', null, 'Observações', h('input', { name: 'notes', class: 'j365-input', maxlength: 300 })),
       h('button', { class: 'btn primary', type: 'submit', disabled: !can.manageApps }, 'Adicionar'));

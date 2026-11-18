@@ -22,7 +22,11 @@ For the logo beside the company name, open **Settings** in the signed-in portal.
 
 ### What you can manage
 
+The Users report places account status and directory origin side by side, with an eight-product license ranking below. Select a product to filter the account table and export the matching rows. [Preview the Users report](docs/assets/users-en.webp)
+
 **Device experience.** Open **Devices & apps → Device experience score** for the Intune Endpoint Analytics score (0–100), category scores and comparison baselines. Open the device list to find individual machines with poor scores or insufficient data. [Device experience guide and screenshot](docs/device-experience-score.md)
+
+**Application approval.** Discovered apps show the rule or deployment that supports their approval. Intune catalog matches consider platform, product identity and included required or available assignments. A configurable rule recognizes specific Windows components reported with a Microsoft publisher. On iOS/iPadOS, compare discovered software with catalog entries. Registration type, ownership and collection affect which installations Intune can see. [Approval rules and iOS coverage](docs/discovered-apps.md#english)
 
 | Area | What the portal helps you do |
 | --- | --- |
@@ -84,7 +88,11 @@ Para verificar a imagem ao lado do nome da empresa, entre no portal e abra **Con
 
 ### O que você pode gerenciar
 
+Em **Usuários**, compare a situação e a origem das contas. No ranking abaixo, selecione uma licença para filtrar a tabela e exportar os usuários correspondentes. [Ver a tela de Usuários](docs/assets/users-pt-br.webp)
+
 **Experiência dos dispositivos.** Abra **Dispositivos & apps → Score dos dispositivos** para consultar a pontuação do Intune Endpoint Analytics (0–100), as categorias e as referências de comparação. Abra a lista de dispositivos para identificar máquinas com pontuação baixa ou dados insuficientes. [Guia e captura em português](docs/device-experience-score.md#português-do-brasil)
+
+**Homologação de aplicativos.** Em **Apps descobertos**, consulte o critério de cada aplicativo. A correspondência com o catálogo considera plataforma, identidade do produto e atribuição de instalação obrigatória ou disponível com um público incluído. Uma regra configurável reconhece componentes específicos do Windows com editor Microsoft. Em iOS/iPadOS, compare o catálogo ao inventário detectado. A modalidade de inscrição, a propriedade e a coleta influenciam quais instalações o Intune consegue identificar. [Critérios de homologação e cobertura do iOS](docs/discovered-apps.md#português)
 
 | Área | O que o portal permite fazer |
 | --- | --- |

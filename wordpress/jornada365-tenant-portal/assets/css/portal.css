@@ -1593,6 +1593,27 @@ pre.code { margin: 10px 0; max-height: 46vh; overflow: auto; padding: 14px 16px;
 }
 
 /* Shared reading surfaces for reports, tabular tools and settings. */
+.score-coverage-note { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--line); border-inline-start: 3px solid var(--accent); border-radius: 10px; background: var(--hero-wash); color: var(--text); }
+.score-coverage-note > .svgw { color: var(--accent); }
+.score-coverage-note p { margin: 4px 0 0; font-size: .875rem; line-height: 1.5; color: var(--text-2); }
+.score-archive code { display: block; overflow-wrap: anywhere; font-size: .8rem; }
+.account-charts.viz-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.account-charts .viz-card { border-block-start: 3px solid var(--ok); }
+.account-charts .viz-card + .viz-card { border-block-start-color: var(--accent); }
+.app-root .license-ranking { margin-block: 0 18px; border-block-start: 3px solid var(--c-sky); }
+.license-ranking > p { margin: -5px 0 0; }
+.license-ranking ul.bars { display: grid; column-gap: clamp(20px, 4%, 56px); row-gap: 5px; }
+.app-root .license-ranking .bt i { background: linear-gradient(90deg, var(--accent), var(--c-sky)); }
+@container report-metrics (min-width: 47rem) {
+  .license-ranking ul.bars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container report-metrics (max-width: 35rem) {
+  .account-charts.viz-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app-root .viz-card:focus-within { border-color: var(--accent); }
+  .app-root .bar-row.link { transition: background-color .15s ease, color .15s ease; }
+}
 .app-root .sidebar { background: linear-gradient(165deg, var(--hero-wash) 0, var(--surface) 12rem); backdrop-filter: none; -webkit-backdrop-filter: none; }
 .nav-search { flex: none; display: flex; align-items: center; gap: .5rem; margin: 8px 2px 4px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
 .app-root .nav-search input[type="search"] { appearance: none; width: 100%; min-width: 0; height: 34px; border: 0; border-radius: 4px; padding: 0 3px; background: transparent; color: var(--text); font: 500 .8rem var(--f-ui); }

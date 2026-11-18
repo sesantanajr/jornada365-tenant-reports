@@ -14,7 +14,7 @@ class App_Assignments extends Intune_App_Report {
 		return $this->app_params( $params );
 	}
 
-	protected static function assignment_row( array $a ): array {
+	public static function assignment_row( array $a ): array {
 		$target = $a['target'] ?? [];
 		return [
 			'id' => (string) ( $a['id'] ?? '' ), 'intent' => (string) ( $a['intent'] ?? '' ),
@@ -26,7 +26,7 @@ class App_Assignments extends Intune_App_Report {
 		];
 	}
 
-	protected static function assignments_path( string $id ): string {
+	public static function assignments_path( string $id ): string {
 		return '/deviceAppManagement/mobileApps/' . rawurlencode( $id ) . '/assignments?$select=id,intent,target';
 	}
 
@@ -46,8 +46,24 @@ class App_Assignments extends Intune_App_Report {
 			$state['phase']  = 2;
 		}
 		while ( $state['offset'] < count( $state['groups'] ) && ! $this->out_of_time( $deadline ) ) {
-			$ids = array_slice( $state['groups'], $state['offset'], 500 );
+			$ids = array_slice( $state['groups'], $state['offset'], empty( $state['groups_individual'] ) ? 1000 : 20 );
 			try {
+				// Directory objects require Directory.Read.All. The group endpoint also supports
+				// narrower group-read grants that the tenant may already have.
+				if ( ! empty( $state['groups_individual'] ) ) {
+					$batch = array_map( static fn( $id ) => [
+						'id' => $id, 'method' => 'GET', 'url' => '/groups/' . $id . '?$select=id,displayName',
+					], $ids );
+					$groups = $this->fetch_batch( $state, 'group_window', $batch );
+					if ( null === $groups ) { break; }
+					foreach ( $groups as $id => $group ) {
+						if ( 200 === $group['status'] && ! empty( $group['body']['displayName'] ) ) {
+							$state['names'][ $id ] = (string) $group['body']['displayName'];
+						}
+					}
+					$state['offset'] += count( $ids );
+					continue;
+				}
 				$reply = $this->graph->get_directory_objects( $ids, [ 'group' ] );
 				if ( ! isset( $reply['value'] ) || ! is_array( $reply['value'] ) ) {
 					throw new Graph_Exception( 'O diretório devolveu uma resposta incompleta.', 502 );
@@ -59,21 +75,38 @@ class App_Assignments extends Intune_App_Report {
 				$this->pause_read( $state, $e->retry_after, $e->reason );
 				break;
 			} catch ( Graph_Exception $e ) {
+				if ( 403 === $e->getCode() && empty( $state['groups_individual'] ) ) {
+					$state['groups_individual'] = true;
+					continue;
+				}
 				$this->optional_error( $state, 'Nomes dos grupos indisponíveis', $e );
 				$state['offset'] = count( $state['groups'] );
 				break;
 			}
 			$state['offset'] += count( $ids );
 		}
-		return $this->progress( $state, $state['offset'] >= count( $state['groups'] ), $n + $state['offset'], 'Consultando nomes de grupos…' );
+		$done = $state['offset'] >= count( $state['groups'] );
+		if ( $done && count( array_filter( $state['names'] ?? [], 'strlen' ) ) < count( $state['groups'] ) ) {
+			$this->warn( $state, 'Alguns grupos não retornaram um nome. O relatório conserva os IDs e as atribuições.' );
+		}
+		return $this->progress( $state, $done, $n + $state['offset'], 'Consultando nomes de grupos…' );
 	}
 
 	public function finalize( array $state, array $params ): array {
-		$rows = $state['rows'];
-		foreach ( $rows as &$row ) {
+		$rows = [];
+		foreach ( $state['rows'] as $row ) {
+			// Tenant-wide jobs store app metadata once per catalog entry until delivery.
+			if ( isset( $row['appIndex'] ) ) {
+				$row += $state['catalog'][ $row['appIndex'] ];
+				unset( $row['appIndex'] );
+			}
 			$row['groupName'] = $state['names'][ $row['groupId'] ] ?? '';
+			if ( '' === $row['id'] ) {
+				$rows[] = $row;
+			} else {
+				$rows[ ( $row['appId'] ?? $params['id'] ?? '' ) . ':' . $row['id'] ] = $row;
+			}
 		}
-		unset( $row );
-		return [ 'rows' => $rows ];
+		return [ 'rows' => array_values( $rows ) ];
 	}
 }

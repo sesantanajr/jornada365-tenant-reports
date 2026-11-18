@@ -309,12 +309,14 @@ final class Jobs {
 		if ( $wait > 0 ) {
 			$wpdb->update( $table, [ 'status' => 'pending', 'updated_at' => gmdate( 'Y-m-d H:i:s' ) ], [ 'job_id' => $job_id ] );
 			$row['status'] = 'pending';
-			return self::public_view( $row ) + [ 'retryAfter' => $wait ];
+			return self::public_view( $row ) + [ 'retryAfter' => $wait, 'waitReason' => $state['_retry_reason'] ?? 'throttled', 'pagesRead' => (int) ( $state['_pages_read'] ?? 0 ) ];
 		}
 		unset( $state['_retry_at'], $state['_retry_reason'] );
 		$retry = 0;
 		$is_action = array_key_exists( $row['job_type'], self::action_registry() );
 		$previous_phase = $state['phase'] ?? null;
+		$previous_pages = (int) ( $state['_pages_read'] ?? 0 );
+		$advanced = false;
 
 		$deadline = microtime( true ) + self::STEP_BUDGET;
 		$report->set_deadline( $deadline );
@@ -331,11 +333,11 @@ final class Jobs {
 				$result = [ 'state' => $state, 'done' => false, 'progress' => $row['progress'], 'total' => $row['total'], 'message' => $e->getMessage() ];
 			}
 			$state  = $result['state'];
+			$advanced = $previous_phase !== ( $state['phase'] ?? null ) || (int) ( $state['_pages_read'] ?? 0 ) > $previous_pages || (int) ( $result['progress'] ?? 0 ) > (int) $row['progress'];
 			$retry  = max( 0, (int) ( $state['_retry_at'] ?? 0 ) - time() );
 			$reason = $state['_retry_reason'] ?? 'throttled';
 			if ( $retry > 0 && ! $is_action ) {
-				$progressed = $previous_phase !== ( $state['phase'] ?? null ) || (int) ( $result['progress'] ?? 0 ) > (int) $row['progress'];
-				$attempts   = $progressed ? 1 : 1 + (int) ( $state['_read_retries'] ?? 0 );
+				$attempts   = $advanced ? 1 : 1 + (int) ( $state['_read_retries'] ?? 0 );
 				$limit      = 'throttled' === $reason ? self::MAX_REPORT_RETRIES : 3;
 				if ( $retry >= self::TTL || $attempts > $limit ) {
 					throw new Graph_Exception(
@@ -423,8 +425,13 @@ final class Jobs {
 			return [ 'job_id' => $job_id, 'status' => 'error', 'progress' => 0, 'total' => 0, 'message' => 'Job expirado.' ];
 		}
 		$view = self::public_view( $row, $session );
+		if ( ! $is_action && 'pending' === $view['status'] ) {
+			$view['advanced'] = $advanced;
+			$view['pagesRead'] = (int) ( $state['_pages_read'] ?? 0 );
+		}
 		if ( $retry > 0 && 'pending' === $view['status'] ) {
 			$view['retryAfter'] = $retry; // the browser waits before polling again
+			$view['waitReason'] = $reason;
 		}
 		return $view;
 	}

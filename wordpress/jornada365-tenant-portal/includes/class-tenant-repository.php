@@ -151,6 +151,7 @@ final class Tenant_Repository {
 		$s = array_merge( [ 'auto_approve_intune_apps' => true, 'trust_microsoft_publisher' => false, 'extra_users' => [] ], $tenant['settings'] ?? [] );
 		return [
 			'auto_approve_intune_apps'  => (bool) $s['auto_approve_intune_apps'],
+			'recognize_windows_components' => (bool) ( $s['recognize_windows_components'] ?? true ),
 			'trust_microsoft_publisher' => (bool) $s['trust_microsoft_publisher'],
 			'extra_users_count'         => count( (array) $s['extra_users'] ),
 			'actions_scope'             => self::action_scope( $tenant ),

@@ -10,7 +10,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Allowlist_Repository {
 
-	public const PLATFORMS   = [ 'any', 'windows', 'macOS', 'iOS', 'androidOSP', 'other' ];
+	public const PLATFORMS   = [ 'any', 'windows', 'windowsMobile', 'windowsHolographic', 'macOS', 'iOS', 'iPadOS', 'androidOSP',
+		'androidDeviceAdministrator', 'androidWorkProfile', 'androidDedicatedAndFullyManaged', 'chromeOS', 'linux', 'other', 'unknown', 'unknownFutureValue' ];
 	public const MATCH_TYPES = [ 'exact', 'contains', 'prefix', 'regex' ];
 
 	public static function all( string $tenant_id ): array {
@@ -21,12 +22,18 @@ final class Allowlist_Repository {
 
 	public static function add( string $tenant_id, array $data, string $actor ): array {
 		global $wpdb;
+		$platforms = array_combine( array_map( 'strtolower', self::PLATFORMS ), self::PLATFORMS );
+		$platform = strtolower( trim( (string) ( $data['platform'] ?? 'any' ) ) );
+		if ( ! isset( $platforms[ $platform ] ) ) {
+			throw new \InvalidArgumentException( 'Plataforma não reconhecida para esta regra.' );
+		}
+		$match_type = $data['match_type'] ?? 'exact';
 		$row = [
 			'tenant_id'  => strtolower( $tenant_id ),
 			'app_name'   => mb_substr( sanitize_text_field( $data['app_name'] ?? '' ), 0, 255 ),
 			'publisher'  => mb_substr( sanitize_text_field( $data['publisher'] ?? '' ), 0, 255 ),
-			'platform'   => in_array( $data['platform'] ?? 'any', self::PLATFORMS, true ) ? $data['platform'] : 'any',
-			'match_type' => in_array( $data['match_type'] ?? 'exact', self::MATCH_TYPES, true ) ? $data['match_type'] : 'exact',
+			'platform'   => $platforms[ $platform ],
+			'match_type' => in_array( $match_type, self::MATCH_TYPES, true ) ? $match_type : 'exact',
 			'notes'      => mb_substr( sanitize_text_field( $data['notes'] ?? '' ), 0, 500 ),
 			'created_by' => Privacy::uid( $actor ), // pseudonym only
 			'created_at' => gmdate( 'Y-m-d H:i:s' ),
@@ -37,7 +44,9 @@ final class Allowlist_Repository {
 		if ( 'regex' === $row['match_type'] && ( mb_strlen( $row['app_name'] ) > 200 || false === @preg_match( '/' . str_replace( '/', '\/', $row['app_name'] ) . '/iu', '' ) ) ) {
 			throw new \InvalidArgumentException( 'Expressão regular inválida.' );
 		}
-		$wpdb->insert( Installer::table( 'app_allowlist' ), $row );
+		if ( false === $wpdb->insert( Installer::table( 'app_allowlist' ), $row ) ) {
+			throw new \RuntimeException( 'Não foi possível salvar a regra de homologação.' );
+		}
 		$row['id'] = (int) $wpdb->insert_id;
 		Audit::log( 'allowlist_add', $tenant_id, $actor, $row );
 		Report_Cache::invalidate( $tenant_id, 'apps' );

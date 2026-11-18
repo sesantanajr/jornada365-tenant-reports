@@ -22,6 +22,11 @@ final class Graph_Exception extends \RuntimeException {
 		return 403 === $this->getCode();
 	}
 
+	public function resource_missing(): bool {
+		return 404 === $this->getCode() || ( 400 === $this->getCode()
+			&& in_array( strtolower( $this->graph_code ), [ 'resourcenotfound', 'request_resourcenotfound', 'itemnotfound' ], true ) );
+	}
+
 	/** Safe, stable context for report failures. A generic 403 does not identify the missing prerequisite. */
 	public function report_issue(): array {
 		$status = $this->getCode();
@@ -30,7 +35,7 @@ final class Graph_Exception extends \RuntimeException {
 			'Authentication_RequestFromNonPremiumTenantOrB2CTenant' === $this->graph_code => 'license',
 			403 === $status => 'access',
 			401 === $status => 'authorization',
-			404 === $status => 'unavailable',
+			$this->resource_missing() => 'unavailable',
 			in_array( $status, [ 408, 429, 500, 502, 503, 504 ], true ) || 'network' === $this->graph_code => 'temporary',
 			default => 'request',
 		};

@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,21 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.8.0 =
+English
+
+* Filter Intune applications and catalog assignments by platform and review deployment targets in plain language. Discovered applications show the evidence used for approval.
+* If Intune cannot return the current Endpoint Analytics overview, the portal looks for the latest dated historical measurement and explains access or collection requirements.
+* Restore earlier Entra Identity Score observations from tenant-tagged CSV files as well as portal JSON archives. The coverage note identifies gaps in the selected period.
+* User account charts and the license ranking now adapt to the report width. Report searches reuse results in the current tab and show progress during service throttling.
+
+Português do Brasil
+
+* Filtre aplicativos e atribuições do Intune por plataforma e consulte os destinos da implantação em linguagem simples. Aplicativos descobertos mostram o critério de homologação.
+* Quando o Intune não fornece o resumo atual do Endpoint Analytics, o portal consulta a medição histórica mais recente com a data e explica os requisitos de acesso ou coleta.
+* Recupere medições anteriores do Identity Score por CSV com o ID do tenant ou por arquivos JSON do portal. O relatório indica a cobertura e as lacunas no período selecionado.
+* Os gráficos de contas e o ranking de licenças se adaptam à largura do relatório. As pesquisas reaproveitam resultados na aba e o portal indica o progresso durante pausas do serviço.
+
 = 1.7.0 =
 English
 
