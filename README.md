@@ -14,7 +14,9 @@ Open the hosted portal and select **Sign in with Microsoft 365**. On first use, 
 
 ### Overview
 
-Compare directory accounts, Conditional Access policy states and the most assigned paid products. Open a chart's report for details, or check the collection times to see which sources responded. The dashboard uses the same Graph requests as the overview it summarizes.
+The glass artwork in the banner is part of the dashboard. The toolbar shows how many paid seats are assigned and when the summary was generated. The three charts below it show directory accounts, Conditional Access policy states and the most assigned paid products. Open a chart's report for details or expand the collection times to check individual sources.
+
+When sharing your own installation, set a featured image on the WordPress portal page to customize its link preview. A built-in 1200 × 627 image is available by default.
 
 ![Executive Overview showing directory accounts, policy states and the five most assigned products in a fictional tenant.](docs/assets/overview-en.webp)
 
@@ -82,7 +84,9 @@ Abra o portal e selecione **Entrar com Microsoft 365**. No primeiro acesso, um a
 
 ### Visão geral
 
-Compare as contas do diretório, o estado das políticas de Acesso Condicional e os produtos pagos com mais atribuições. Abra o relatório pelo gráfico para investigar ou consulte os horários de coleta para saber quais fontes responderam.
+O banner com as barras de vidro faz parte do painel. A faixa abaixo mostra quantas licenças pagas foram atribuídas e quando o resumo foi gerado. Os três gráficos apresentam as contas do diretório, o estado das políticas de Acesso Condicional e os produtos pagos com mais atribuições. Abra o relatório pelo gráfico para investigar ou expanda os horários de coleta para conferir cada fonte.
+
+Se você hospeda o portal, pode personalizar a prévia do link definindo uma imagem destacada na página do WordPress. O plugin inclui uma imagem padrão de 1200 × 627 pixels.
 
 ![Visão geral com contas do diretório, estados das políticas e cinco produtos com mais atribuições em um tenant fictício.](docs/assets/overview-pt-br.webp)
 

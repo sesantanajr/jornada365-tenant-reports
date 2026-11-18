@@ -98,7 +98,8 @@ final class Overview extends Report_Base {
 		}
 
 		$it = $res['intune'] ?? [];
-		$out['counts']['intuneDevices'] = 200 === ( $it['status'] ?? 0 ) ? Graph_Client::batch_int( $it['body']['enrolledDeviceCount'] ?? null ) : null;
+		$devices = Graph_Client::entity( $it['body'] ?? null );
+		$out['counts']['intuneDevices'] = 200 === ( $it['status'] ?? 0 ) ? Graph_Client::batch_int( $devices['enrolledDeviceCount'] ?? null ) : null;
 		$out['sources']['intune'] = [ 'status' => null === $out['counts']['intuneDevices'] ? 'unavailable' : 'ok', 'checked_at' => $state['checked']['intune'] ?? $checked ];
 		if ( null === $out['counts']['intuneDevices'] ) {
 			$this->source_error( $state, 'Intune', $it );

@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 ROOT = Path(__file__).resolve().parents[1]
 SLUG = "jornada365-tenant-portal"
 PLUGIN = ROOT / "wordpress" / SLUG
-RELEASE_EXTENSIONS = {".php", ".js", ".css", ".json", ".txt", ".svg", ".webp", ".woff2"}
+RELEASE_EXTENSIONS = {".php", ".js", ".css", ".json", ".txt", ".svg", ".jpg", ".webp", ".woff2"}
 VERSION = r"([0-9]+\.[0-9]+\.[0-9]+)"
 
 

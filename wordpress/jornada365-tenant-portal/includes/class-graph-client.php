@@ -454,28 +454,38 @@ final class Graph_Client {
 		return $out;
 	}
 
+	/** Intune can return a single entity directly or inside value. Lists are not entities. */
+	public static function entity( $data ): array {
+		if ( ! is_array( $data ) ) {
+			return [];
+		}
+		$item = array_key_exists( 'value', $data ) ? $data['value'] : $data;
+		return is_array( $item ) && ! array_is_list( $item ) ? $item : [];
+	}
+
 	/**
 	 * Integer body of a $count sub-response inside $batch: a JSON number, a numeric string or a
 	 * base64-encoded text/plain body, depending on the gateway. Null when it isn't a count.
 	 */
 	public static function batch_int( $body ): ?int {
 		if ( is_int( $body ) ) {
-			return $body;
+			return $body >= 0 ? $body : null;
 		}
 		if ( is_float( $body ) ) {
-			return (int) $body;
+			return $body >= 0 && $body < PHP_INT_MAX && floor( $body ) === $body ? (int) $body : null;
 		}
 		if ( is_array( $body ) && isset( $body['value'] ) && ! is_array( $body['value'] ) ) {
 			return self::batch_int( $body['value'] );
 		}
 		if ( is_string( $body ) ) {
-			$t = trim( $body );
-			if ( '' !== $t && ctype_digit( $t ) ) {
-				return (int) $t;
+			$digits = trim( $body );
+			if ( ! ctype_digit( $digits ) ) {
+				$decoded = base64_decode( $digits, true );
+				$digits  = false !== $decoded ? trim( $decoded ) : '';
 			}
-			$dec = base64_decode( $t, true );
-			if ( false !== $dec && '' !== trim( $dec ) && ctype_digit( trim( $dec ) ) ) {
-				return (int) trim( $dec );
+			if ( ctype_digit( $digits ) ) {
+				$count = filter_var( ltrim( $digits, '0' ) ?: '0', FILTER_VALIDATE_INT );
+				return false === $count ? null : $count;
 			}
 		}
 		return null;

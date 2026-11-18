@@ -2887,5 +2887,16 @@
  "Expira em até 30 dias": "Expires within 30 days",
  "Expira entre 31 e 90 dias": "Expires in 31–90 days",
  "Validade desconhecida": "Unknown expiration",
- "Mais de 90 dias": "More than 90 days"
+ "Mais de 90 dias": "More than 90 days",
+ "Um raio-X do seu Microsoft 365.": "Your Microsoft 365 at a glance.",
+ "Licenças mais atribuídas": "Most assigned licenses",
+ "Os percentuais usam o total de contas. Uma conta pode aparecer nos dois grupos.": "Percentages use all directory accounts. An account can appear in both groups.",
+ "Até cinco produtos pagos, por número de licenças atribuídas.": "Up to five paid products, ranked by assigned licenses.",
+ "Revise os produtos com pelo menos 95% das licenças atribuídas ({n}).": "Review products with at least 95% of their licenses assigned ({n}).",
+ "Revise os produtos com mais atribuições que licenças habilitadas ({n}).": "Review products with more assignments than enabled licenses ({n}).",
+ "Atribuídas": "Assigned",
+ "Atribuição (%)": "Assigned (%)",
+ "Identidades, licenças e dispositivos da sua organização.": "Identities, licenses and devices in your organization.",
+ "Licenças pagas atribuídas": "Paid licenses assigned",
+ "{a} atribuídas de {b} habilitadas": "{a} assigned out of {b} enabled"
 }

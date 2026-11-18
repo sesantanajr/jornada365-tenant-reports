@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.9.0
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,19 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 2.0.0 =
+English
+
+* The Overview opens with the blue glass banner. Its toolbar brings together paid seat assignments, the generation time and Excel export. The directory, Conditional Access and license charts link to their reports and adapt to narrow screens.
+* The Intune device count now accepts the documented Graph response wrapper and distinguishes a measured zero from an unavailable count.
+* The public portal provides a landscape link preview. WordPress site owners can customize it with the portal page’s featured image.
+
+Português do Brasil
+
+* A Visão geral ganhou o banner com barras de vidro azuis. A faixa de indicadores reúne as licenças pagas atribuídas, a hora da consulta e a exportação para Excel. Os gráficos de identidade, Acesso Condicional e licenças levam aos relatórios detalhados e se adaptam ao celular.
+* A contagem de dispositivos do Intune também reconhece o formato de resposta documentado pelo Graph e distingue zero dispositivos de uma contagem indisponível.
+* O link público do portal ganhou uma prévia horizontal. Quem hospeda o WordPress pode personalizá-la com a imagem destacada da página.
+
 = 1.9.0 =
 English
 

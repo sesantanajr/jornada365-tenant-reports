@@ -1,10 +1,10 @@
 # Repository artwork
 
-The cover pairs the Jornada 365 wordmark with a glass data sculpture in the brand’s blue palette. It was designed with the built-in ImageGen tool. Both portal screenshots use the same fictional tenant. [Jornada 365](https://jornada365.cloud/) · [Brand reference](https://jornada365.cloud/wp-content/uploads/2024/10/Logotipo-Jornada-365-Home-4.png)
+The cover pairs the Jornada 365 wordmark with a blue glass sculpture. The version 2.0 Overview uses the same artwork. The Portuguese and English screenshots show the actual plugin with fictional tenant data. [Jornada 365](https://jornada365.cloud/) · [Brand reference](https://jornada365.cloud/wp-content/uploads/2024/10/Logotipo-Jornada-365-Home-4.png)
 
 ## Imagens do repositório
 
-A capa combina a marca Jornada 365 com uma composição de vidro na paleta azul do projeto. Foi criada com o ImageGen. As duas capturas do portal usam o mesmo tenant fictício. [Jornada 365](https://jornada365.cloud/)
+A capa combina a marca Jornada 365 com as barras de vidro azuis que também aparecem na Visão geral da versão 2.0. As capturas em português e inglês mostram telas do plugin com dados fictícios. [Jornada 365](https://jornada365.cloud/)
 
 <details>
 <summary>ImageGen prompt</summary>

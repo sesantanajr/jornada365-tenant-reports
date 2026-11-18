@@ -1931,7 +1931,8 @@
   function reportPanel(type, params, title, build, opts = {}) {
     const panel = h('div', { class: 'panel rp', 'data-report': type, 'data-graph-source': opts.graphSource });
     PANEL_META.set(panel, { type, title: t(title), subtitle: opts.subtitle ? t(opts.subtitle) : '' });
-    const h2 = h('h2', null, title);
+    const overview = type === 'overview';
+    const h2 = h('h2', null, overview ? 'Um raio-X do seu Microsoft 365.' : title);
     const status = h('div', { class: 'rp-status', role: 'status' });
     const refreshLabel = h('span', null, 'Gerar novamente');
     const refresh = h('button', { class: 'btn sm glass', type: 'button', onclick: () => load(true), title: 'Consultar o Microsoft Graph novamente' }, icon('refresh'), refreshLabel);
@@ -1940,10 +1941,15 @@
     const ringBox = h('div', { class: 'rp-ring', hidden: true });
     const tools = h('div', { class: 'rp-tools' }, opts.controls || null, refresh, cancel, opts.tools || null);
     const category = NAV.find(group => group.items.some(([id]) => id === type));
-    const hero = h('header', { class: 'rp-hero' },
+    const subtitle = opts.subtitle ? h('p', { class: 'rp-sub' }, opts.subtitle) : null;
+    const hero = overview ? h('header', { class: 'rp-hero overview-hero' },
+      h('div', { class: 'overview-mast' }, h('div', { class: 'rp-txt' },
+        h('p', { class: 'rp-category' }, title), h2, subtitle)),
+      h('div', { class: 'overview-toolbar' }, ringBox, h('div', { class: 'overview-actions' }, status, tools))
+    ) : h('header', { class: 'rp-hero' },
       h('div', { class: 'rp-main' },
         h('div', { class: 'rp-ic', 'aria-hidden': 'true' }, icon(opts.icon || navIcon(type))),
-        h('div', { class: 'rp-txt' }, category ? h('p', { class: 'rp-category' }, category.label) : null, h2, opts.subtitle ? h('p', { class: 'rp-sub' }, opts.subtitle) : null, status)),
+        h('div', { class: 'rp-txt' }, category ? h('p', { class: 'rp-category' }, category.label) : null, h2, subtitle, status)),
       ringBox, tools);
     const body = h('div', { class: 'rp-body' });
     const feedback = h('div', { class: 'rp-feedback', hidden: true });
@@ -2049,7 +2055,8 @@
 
   function overviewCharts(counts, licenses, sources, available) {
     const card = (title, description, content, route, label) => h('section', { class: 'overview-chart' },
-      h('h3', null, title), h('p', { class: 'overview-caption' }, description), content,
+      h('h3', null, h('span', { class: 'overview-chart-icon' }, icon(navIcon(route))), title), content,
+      h('p', { class: 'overview-caption' }, description),
       available.includes(route) ? h('a', { class: 'overview-open', href: '#' + route }, label, h('span', { 'aria-hidden': 'true' }, raw(' ↗'))) : null);
     const empty = text => h('p', { class: 'overview-empty' }, text);
     const plot = (title, entries, total, kind) => {
@@ -2088,7 +2095,7 @@
       policies.append(h('ul', { class: 'overview-legend' }, ...policyRows.map(([label,n,tone]) => h('li', null,
         h('i', { class: 'overview-' + tone, 'aria-hidden': 'true' }), h('span', null, label), h('strong', null, raw(num(n)))))));
     }
-    const title = 'Produtos com mais atribuições';
+    const title = 'Licenças mais atribuídas';
     const paid = licenses.filter(l => (l.kind || 'paid') === 'paid');
     const ranked = paid.filter(l => overviewNumber(l.consumed) && l.consumed > 0).sort((a,b) => b.consumed - a.consumed).slice(0, 5);
     let volume;
@@ -2096,13 +2103,13 @@
       volume = plot(title, ranked.map(l => [l.sku || l.part, l.consumed]), 0, 'counts');
       for (const l of ranked) volume.append(h('div', { class: 'overview-measure' },
         h('div', { class: 'overview-pair' }, h('span', null, raw(l.sku || l.part)), h('strong', null, raw(num(l.consumed)))),
-        rail(l.consumed, ranked[0].consumed)));
+        rail(l.consumed, ranked[0].consumed, 'slate')));
     } else volume = empty(sources.licenses?.status === 'unavailable' || paid.some(l => !overviewNumber(l.consumed))
       ? 'As atribuições de licenças pagas estão indisponíveis nesta consulta.' : 'Nenhuma atribuição de produto pago foi retornada.');
     return h('div', { class: 'overview-charts' },
-      card(identityTitle, 'Cada grupo é comparado ao total de usuários e pode incluir a mesma conta.', identity, 'identity', 'Consultar usuários'),
+      card(identityTitle, 'Os percentuais usam o total de contas. Uma conta pode aparecer nos dois grupos.', identity, 'identity', 'Consultar usuários'),
       card(caTitle, 'Aplicação das políticas de Acesso Condicional.', policies, 'ca', 'Consultar políticas'),
-      card(title, 'Até cinco produtos pagos, por quantidade de lugares atribuídos na consulta.', volume, 'licensing', 'Consultar licenças'));
+      card(title, 'Até cinco produtos pagos, por número de licenças atribuídas.', volume, 'licensing', 'Consultar licenças'));
   }
 
   views.overview = () => { const offscreen = Array.isArray(App.harvesting); return reportPanel('overview', {}, 'Visão geral do tenant', (p) => {
@@ -2141,11 +2148,11 @@
       else if (hrs >= 24) notes.push(['danger', t('Última sincronização do AD (Entra Connect / Cloud Sync) há {n} horas — verifique o servidor de sincronização.', { n: num(hrs) })]);
       else if (hrs >= 3) notes.push(['warn', t('Última sincronização do AD registrada há {n} horas. Confira o horário esperado no seu ambiente.', { n: num(hrs) })]);
     }
-    const over = paid.filter((l) => l.enabled > 0 && l.consumed > l.enabled);
+    const over = paid.filter((l) => l.consumed > l.enabled);
     const full = paid.filter((l) => l.enabled > 0 && l.consumed <= l.enabled && l.consumed / l.enabled >= 0.95);
     const idle = paid.filter((l) => l.enabled > 0 && l.consumed === 0);
-    if (over.length) notes.push(['danger', t('{n} licença(s) com mais atribuições do que lugares comprados.', { n: over.length }), go('licensing')]);
-    if (full.length) notes.push(['warn', t('{n} licença(s) com 95% ou mais dos lugares em uso.', { n: full.length }), go('licensing')]);
+    if (over.length) notes.push(['danger', t('Revise os produtos com mais atribuições que licenças habilitadas ({n}).', { n: over.length }), go('licensing')]);
+    if (full.length) notes.push(['warn', t('Revise os produtos com pelo menos 95% das licenças atribuídas ({n}).', { n: full.length }), go('licensing')]);
     if (idle.length) notes.push(['warn', t('{n} licença(s) paga(s) sem nenhum usuário atribuído.', { n: idle.length }), go('licensing')]);
     if (c.caReportOnly) notes.push(['info', t('{n} política(s) em modo somente relatório. Revise os resultados da simulação antes de decidir pela ativação.', { n: c.caReportOnly }), go('ca')]);
     if (c.caTotal === 0) notes.push(['danger', t('Nenhuma política de Acesso Condicional foi retornada. Confira os padrões de segurança e a estratégia de MFA do tenant.'), go('authpolicies')]);
@@ -2169,14 +2176,14 @@
       h('div', { class: 'panel span2' }, h('h3', null, 'Licenças'), DataTable({ rows: licenses, name: 'licencas-visao-geral', sheet: 'Produtos do tenant', compact: true,
         emptyText: sources.licenses?.status === 'unavailable' ? 'Indisponível.' : 'Nenhum produto foi retornado.', columns: [
           { key: 'sku', label: 'Produto', render: l => h('div', null, product(l.sku, l.part), KIND_BADGE[l.kind] ? badge(...KIND_BADGE[l.kind]) : null) },
-          { key: 'part', label: 'SKU', exportOnly: true }, { key: 'consumed', label: 'Consumidas' }, { key: 'enabled', label: 'Compradas' },
-          { key: 'occupancy', label: 'Uso', render: l => (l.kind || 'paid') === 'paid' && overviewNumber(l.consumed) && l.enabled > 0
+          { key: 'part', label: 'SKU', exportOnly: true }, { key: 'consumed', label: 'Atribuídas' }, { key: 'enabled', label: 'Habilitadas' },
+          { key: 'occupancy', label: 'Atribuição (%)', render: l => (l.kind || 'paid') === 'paid' && overviewNumber(l.consumed) && l.enabled > 0
             ? meter(Math.round(100 * l.consumed / l.enabled), l.consumed > l.enabled ? 'danger' : l.consumed / l.enabled >= 0.95 ? 'warn' : 'ok') : '—',
             export: l => (l.kind || 'paid') === 'paid' && overviewNumber(l.consumed) && l.enabled > 0 ? Math.round(100 * l.consumed / l.enabled) + '%' : null }
         ] })))
     );
     return box;
-  }, { subtitle: 'Acompanhe identidades, controles de acesso e licenças do seu ambiente Microsoft 365.', icon: 'home',
+  }, { subtitle: 'Identidades, licenças e dispositivos da sua organização.', icon: 'home',
     tools: offscreen ? null : h('button', { class: 'btn sm primary', type: 'button', onclick: executiveDialog, title: t('Excel pronto para a diretoria: indicadores, gráficos, destaques e planilhas com filtros de cada área — montado no seu navegador.') }, icon('sheet'), 'Gerar Excel executivo'),
     ring: (p) => {
       if (p.sources?.licenses && p.sources.licenses.status !== 'ok') return null;
@@ -2184,7 +2191,7 @@
       if (products.some(l => !overviewNumber(l.enabled) || !overviewNumber(l.consumed))) return null;
       const paid = products.filter(l => l.enabled > 0 || l.consumed > 0);
       const used = paid.reduce((a, l) => a + (l.consumed || 0), 0), bought = paid.reduce((a, l) => a + (l.enabled || 0), 0), pc = pctOf(used, bought);
-      return bought ? { pct: pc, pctText: fmtPct(pc), label: 'dos lugares pagos em uso', caption: t('{a} de {b} licenças', { a: num(used), b: num(bought) }), tone: pc > 100 ? 'danger' : pc >= 95 ? 'warn' : 'info' } : null;
+      return bought ? { pct: pc, pctText: fmtPct(pc), label: 'Licenças pagas atribuídas', caption: t('{a} atribuídas de {b} habilitadas', { a: num(used), b: num(bought) }), tone: pc > 100 ? 'danger' : pc >= 95 ? 'warn' : 'info' } : null;
     } }); };
 
   /* Identity */

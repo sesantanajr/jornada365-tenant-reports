@@ -1,6 +1,7 @@
 <?php
 namespace J365TP\Reports;
 
+use J365TP\Graph_Client;
 use J365TP\Graph_Exception;
 use J365TP\Graph_Throttled;
 
@@ -37,12 +38,6 @@ final class Device_Score extends Report_Base {
 		return is_string( $id ) && (bool) preg_match( '/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/D', $id );
 	}
 
-	/** Intune's GET examples show a single entity inside value; Graph can also return the entity directly. */
-	private static function entity( array $data ): array {
-		$item = array_key_exists( 'value', $data ) ? $data['value'] : $data;
-		return is_array( $item ) && ! array_is_list( $item ) ? $item : [];
-	}
-
 	private static function score( $value, string $state = '' ): ?float {
 		if ( ! is_numeric( $value ) || in_array( $state, [ 'insufficientData', 'unknown', 'unknownFutureValue' ], true ) ) {
 			return null;
@@ -66,7 +61,7 @@ final class Device_Score extends Report_Base {
 	}
 
 	private static function overview( array $item ): array {
-		$item = self::entity( $item );
+		$item = Graph_Client::entity( $item );
 		$state = (string) ( $item['state'] ?? '' );
 		$metrics = [];
 		foreach ( self::CATEGORIES as $key => [ $field, $status ] ) {
@@ -80,11 +75,11 @@ final class Device_Score extends Report_Base {
 	}
 
 	private static function baseline( array $item ): array {
-		$item = self::entity( $item );
+		$item = Graph_Client::entity( $item );
 		$metrics = [];
 		foreach ( self::BASELINE_CATEGORIES as $key => $relation ) {
 			if ( is_array( $item[ $relation ] ?? null ) ) {
-				$category = self::entity( $item[ $relation ] );
+				$category = Graph_Client::entity( $item[ $relation ] );
 				if ( $category ) {
 					$metrics[ $key ] = self::score( $category['overallScore'] ?? null, (string) ( $category['state'] ?? '' ) );
 				}
@@ -127,7 +122,7 @@ final class Device_Score extends Report_Base {
 				$this->optional_error( $state, 'Detalhes da referência indisponíveis', new Graph_Exception( '', $response['status'], (string) ( $body['error']['code'] ?? '' ) ) );
 				continue;
 			}
-			$body = self::entity( $body );
+			$body = Graph_Client::entity( $body );
 			if ( 'summary' === $key ) {
 				$row['score'] = self::score( $body['overallScore'] ?? null );
 				$row['name'] = (string) ( $body['displayName'] ?? $row['name'] );
@@ -267,7 +262,7 @@ final class Device_Score extends Report_Base {
 		}
 		if ( $done && ! empty( $state['try_app_category'] ) && empty( $state['historical'] ) ) {
 			try {
-				$category = self::entity( $this->graph->get( self::ROOT . 'AppHealthOverview' ) );
+				$category = Graph_Client::entity( $this->graph->get( self::ROOT . 'AppHealthOverview' ) );
 				$health = (string) ( $category['state'] ?? '' );
 				$value = self::score( $category['overallScore'] ?? null, $health );
 				if ( null !== $value ) {

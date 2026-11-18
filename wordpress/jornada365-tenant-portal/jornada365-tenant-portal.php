@@ -3,7 +3,7 @@
  * Plugin Name:       Tenant Jornada365
  * Plugin URI:        https://tenant.jornada365.cloud
  * Description:       Portal de relatórios Microsoft 365 / Entra ID / Intune da Jornada 365. Cada empresa conecta o próprio tenant: o app "Tenant Jornada365" é criado dentro do tenant dela (aplicativo de página única, permissões delegadas, sem segredo e sem certificado), sem depender de nenhum outro tenant. Relatórios somente leitura, ações delegadas (Intune e Exchange) e Excel executivo gerado no navegador.
- * Version:           1.9.0
+ * Version:           2.0.0
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Sérgio Sant'Ana Júnior – Jornada 365
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'J365TP_VERSION', '1.9.0' );
+define( 'J365TP_VERSION', '2.0.0' );
 define( 'J365TP_ASSET_VERSION', J365TP_VERSION );
 define( 'J365TP_FILE', __FILE__ );
 define( 'J365TP_DIR', plugin_dir_path( __FILE__ ) );
