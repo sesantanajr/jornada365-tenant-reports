@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.8.0
+Stable tag: 1.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,21 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.9.0 =
+English
+
+* Open the groups inventory as soon as the directory pages arrive. Request member and owner counts for one group or the entire inventory when needed. Interrupted reads with saved pages can resume from My reports.
+* Endpoint Analytics reads the current summary, dated measurements and comparison baselines independently. If a baseline list omits its scores, the portal can read the reference and its categories by ID.
+* Identity Score and its Excel report cover the current UTC month and the three preceding months, with measured points and percentages.
+* Microsoft 365 adoption compares active users with the users licensed for each service. The sign-in page includes a responsive layout and keyboard-accessible controls.
+
+Português do Brasil
+
+* Abra o inventário de grupos assim que as páginas do diretório chegarem. Consulte membros e proprietários de um grupo ou solicite a contagem completa quando precisar. Leituras interrompidas com páginas salvas podem ser retomadas em Meus relatórios.
+* O Endpoint Analytics consulta separadamente o resumo atual, as medições datadas e as referências de comparação. Quando a lista de referências omite os valores, o portal pode buscar a referência e suas categorias pelo identificador.
+* O Identity Score e o Excel exibem o mês atual em UTC e os três anteriores, com os pontos e percentuais medidos.
+* A adoção do Microsoft 365 compara os usuários ativos com os licenciados de cada serviço. A página de login tem um novo layout responsivo e controles acessíveis por teclado.
+
 = 1.8.0 =
 English
 

@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Identity extends Report_Base {
 
-	private const USER_SELECT = 'id,displayName,userPrincipalName,mail,userType,accountEnabled,createdDateTime,onPremisesSyncEnabled,onPremisesLastSyncDateTime,assignedLicenses,jobTitle,department,companyName,externalUserState,creationType,lastPasswordChangeDateTime,usageLocation';
+	private const USER_SELECT = 'id,displayName,userPrincipalName,mail,userType,accountEnabled,createdDateTime,onPremisesSyncEnabled,onPremisesLastSyncDateTime,assignedLicenses,jobTitle,department,companyName,externalUserState,lastPasswordChangeDateTime,usageLocation';
 
 	public function normalize_params( array $params ): array {
 		return [];
@@ -61,7 +61,13 @@ final class Identity extends Report_Base {
 			$top    = $state['premium'] ? 500 : 999;
 			$url    = '/v1.0/users?$select=' . $select . '&$top=' . $top;
 			try {
-				$done = $this->fetch_collection( $state, 'users', $url, $deadline, [], [ $this, 'map_user' ] );
+				// Keep the field names only once in an encrypted checkpoint. Save after at
+				// most two pages so a disconnected PHP worker has little work to replay.
+				if ( ! isset( $state['userFields'] ) ) {
+					$state['userFields'] = array_keys( $this->map_user( [ 'id' => '' ] ) );
+				}
+				$done = $this->fetch_collection( $state, 'users', $url, $deadline, [],
+					fn( $user ) => array_values( $this->map_user( $user ) ), null, 2 );
 			} catch ( Graph_Exception $e ) {
 				if ( $state['premium'] && ( $e->is_license_gate() || $e->is_forbidden() || 400 === $e->getCode() ) && empty( $state['users'] ) ) {
 					$this->warn( $state, 'Atividade de login (signInActivity) indisponível: requer Microsoft Entra ID P1/P2 e AuditLog.Read.All. Relatório de inatividade ficará vazio.' );
@@ -154,7 +160,6 @@ final class Identity extends Report_Base {
 			'department'     => (string) ( $u['department'] ?? '' ),
 			'company'        => (string) ( $u['companyName'] ?? '' ),
 			'guestState'     => (string) ( $u['externalUserState'] ?? '' ),
-			'creationType'   => (string) ( $u['creationType'] ?? '' ),
 			'pwdChanged'     => (string) ( $u['lastPasswordChangeDateTime'] ?? '' ),
 			'usageLocation'  => (string) ( $u['usageLocation'] ?? '' ),
 			'lastSignIn'     => self::ts( $sia['lastSignInDateTime'] ?? '' ),
@@ -185,6 +190,9 @@ final class Identity extends Report_Base {
 		];
 
 		foreach ( $state['users'] ?? [] as $u ) {
+			if ( array_is_list( $u ) ) {
+				$u = array_combine( $state['userFields'], $u );
+			}
 			$lic_names = array_map( static fn( $id ) => $skus[ $id ]['name'] ?? \J365TP\Sku_Catalog::name( $id ), $u['skuIds'] );
 			$lic_codes = array_map( static fn( $id ) => $skus[ $id ]['part'] ?? $id, $u['skuIds'] );
 			$paid      = (bool) array_filter( $u['skuIds'], static fn( $id ) => 'paid' === ( $skus[ $id ]['kind'] ?? 'paid' ) );

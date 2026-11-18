@@ -313,7 +313,7 @@ final class Rest_Api {
 	public function run_job( WP_REST_Request $request ) {
 		$s = $this->session();
 		try {
-			return new WP_REST_Response( Jobs::run( (string) $request['id'], $s, '1' === (string) $request->get_header( 'x-j365-report-only' ) ) );
+			return new WP_REST_Response( Jobs::run( (string) $request['id'], $s, '1' === (string) $request->get_header( 'x-j365-report-only' ), true === $request->get_param( 'resume' ) ) );
 		} catch ( \Throwable $e ) {
 			return $this->error( $e );
 		}

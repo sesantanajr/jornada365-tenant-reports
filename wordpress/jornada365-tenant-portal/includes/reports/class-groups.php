@@ -2,6 +2,7 @@
 namespace J365TP\Reports;
 
 use J365TP\Graph_Client;
+use J365TP\Graph_Exception;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -10,27 +11,51 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Groups: source (AD-synced vs cloud), type, dynamic/assigned, member composition
  * (users / nested groups / devices / service principals), empty groups, owners.
- * Counts are gathered with JSON $batch (4 groups × 5 count requests per call).
+ * The inventory only reads the collection. Counts are an explicitly requested report.
  */
 final class Groups extends Report_Base {
 
-	private const SELECT = 'id,displayName,description,mail,mailNickname,mailEnabled,securityEnabled,groupTypes,membershipRule,membershipRuleProcessingState,onPremisesSyncEnabled,onPremisesLastSyncDateTime,onPremisesDomainName,createdDateTime,visibility,isAssignableToRole,resourceProvisioningOptions,classification,expirationDateTime,renewedDateTime';
+	private const SELECT = 'id,displayName,description,mail,mailEnabled,securityEnabled,groupTypes,membershipRule,membershipRuleProcessingState,onPremisesSyncEnabled,onPremisesLastSyncDateTime,onPremisesDomainName,createdDateTime,visibility,isAssignableToRole,resourceProvisioningOptions,expirationDateTime';
+
+	public function normalize_params( array $params ): array {
+		if ( array_key_exists( 'groupId', $params ) ) {
+			if ( ! is_string( $params['groupId'] ) || ! wp_is_uuid( $params['groupId'] ) ) {
+				throw new \InvalidArgumentException( 'ID de grupo inválido.' );
+			}
+			return [ 'groupId' => strtolower( $params['groupId'] ) ];
+		}
+		return 'all' === ( $params['counts'] ?? '' ) ? [ 'counts' => 'all' ] : [];
+	}
 
 	public function initial_state( array $params ): array {
-		return [ 'phase' => 0, 'idx' => 0, 'counts' => [], '_warnings' => [] ];
+		return [ 'phase' => 0, 'idx' => 0, 'counts' => [], 'inventory' => empty( $params ), '_warnings' => [] ];
 	}
 
 	public function step( array $state, array $params, float $deadline ): array {
 		if ( 0 === $state['phase'] ) {
-			$done = $this->fetch_collection( $state, 'groups', '/v1.0/groups?$select=' . self::SELECT . '&$top=999', $deadline );
+			if ( isset( $params['groupId'] ) ) {
+				$group = $this->graph->get( '/v1.0/groups/' . rawurlencode( $params['groupId'] ) . '?$select=' . self::SELECT );
+				if ( strtolower( (string) ( $group['id'] ?? '' ) ) !== $params['groupId'] ) {
+					throw new Graph_Exception( 'O diretório devolveu uma resposta incompleta.', 502 );
+				}
+				$state['groups'] = [ $group ];
+				$done = true;
+			} else {
+				$done = $this->fetch_collection( $state, 'groups', '/v1.0/groups?$select=' . self::SELECT . '&$top=999', $deadline, [],
+					static fn( $group ) => array_filter( $group, static fn( $value ) => null !== $value && [] !== $value && '' !== $value ), null, 3 );
+			}
 			if ( ! $done ) {
 				return [ 'state' => $state, 'progress' => count( $state['groups'] ), 'total' => 0, 'done' => false, 'message' => sprintf( '%d grupos carregados…', count( $state['groups'] ) ) ];
 			}
+			$state['groups'] = array_values( array_column( $state['groups'], null, 'id' ) );
 			$state['phase'] = 1;
 		}
 
 		$groups = $state['groups'];
 		$total  = count( $groups );
+		if ( ! empty( $state['inventory'] ) ) {
+			return [ 'state' => $state, 'progress' => $total, 'total' => $total, 'done' => true, 'message' => 'Concluído' ];
+		}
 		$kinds  = [ 'all' => 'members/$count', 'users' => 'members/microsoft.graph.user/$count', 'groups' => 'members/microsoft.graph.group/$count', 'devices' => 'members/microsoft.graph.device/$count', 'owners' => 'owners/$count' ];
 
 		while ( $state['idx'] < $total && ! $this->out_of_time( $deadline ) ) {
@@ -42,7 +67,12 @@ final class Groups extends Report_Base {
 			while ( $i < $total ) {
 				$g       = $groups[ $i ];
 				$unified = in_array( 'Unified', (array) ( $g['groupTypes'] ?? [] ), true );
-				$need    = $unified ? [ 'all', 'users', 'owners' ] : array_keys( $kinds );
+				$need    = $unified ? [ 'all', 'users' ] : [ 'all', 'users', 'groups', 'devices' ];
+				// The Graph v1.0 owners relationship is unavailable for Exchange-managed and synced groups.
+				// Keep the original shape for an outstanding 1.8 batch on upgrade.
+				if ( ! isset( $state['inventory'] ) || self::owners_applicable( $g ) ) {
+					$need[] = 'owners';
+				}
 				if ( count( $requests ) + count( $need ) > 20 ) {
 					break;
 				}
@@ -80,6 +110,11 @@ final class Groups extends Report_Base {
 		return [ 'state' => $state, 'progress' => $state['idx'], 'total' => $total, 'done' => $done, 'message' => sprintf( 'Contando membros: %d de %d grupos…', $state['idx'], $total ) ];
 	}
 
+	private static function owners_applicable( array $group ): bool {
+		return empty( $group['onPremisesSyncEnabled'] ) && ( in_array( 'Unified', (array) ( $group['groupTypes'] ?? [] ), true )
+			|| ( ! empty( $group['securityEnabled'] ) && empty( $group['mailEnabled'] ) ) );
+	}
+
 	public function finalize( array $state, array $params ): array {
 		$rows    = [];
 		$summary = [
@@ -89,6 +124,7 @@ final class Groups extends Report_Base {
 			'm365'        => 0,
 			'security'    => 0,
 			'distribution' => 0,
+			'other'       => 0,
 			'mailSecurity' => 0,
 			'dynamic'     => 0,
 			'assigned'    => 0,
@@ -128,7 +164,7 @@ final class Groups extends Report_Base {
 					$composition = 'Somente dispositivos';
 				} elseif ( $nested === $all ) {
 					$composition = 'Somente grupos';
-				} else {
+				} elseif ( null !== $users && null !== $devices && null !== $nested ) {
 					$composition = 'Misto';
 				}
 			}
@@ -150,10 +186,10 @@ final class Groups extends Report_Base {
 				'devices'       => $devices,
 				'others'        => $others,
 				'owners'        => $owners,
-				'ownersApplicable' => ! $synced && ( $is_m365 || ( $sec && ! $mail ) ),
+				'ownersApplicable' => self::owners_applicable( $g ),
 				'composition'   => $composition,
-				'isNested'      => null !== $nested && $nested > 0,
-				'isEmpty'       => 0 === $all,
+				'isNested'      => null !== $nested ? $nested > 0 : null,
+				'isEmpty'       => null !== $all ? 0 === $all : null,
 				'roleAssignable' => (bool) ( $g['isAssignableToRole'] ?? false ),
 				'isTeam'        => in_array( 'Team', (array) ( $g['resourceProvisioningOptions'] ?? [] ), true ),
 				'visibility'    => (string) ( $g['visibility'] ?? '' ),
@@ -165,7 +201,7 @@ final class Groups extends Report_Base {
 
 			$summary['total']++;
 			$summary[ $synced ? 'synced' : 'cloudOnly' ]++;
-			$summary[ [ 'Microsoft 365' => 'm365', 'Segurança' => 'security', 'Distribuição' => 'distribution', 'Segurança habilitado para email' => 'mailSecurity' ][ $type ] ?? 'security' ]++;
+			$summary[ [ 'Microsoft 365' => 'm365', 'Segurança' => 'security', 'Distribuição' => 'distribution', 'Segurança habilitado para email' => 'mailSecurity' ][ $type ] ?? 'other' ]++;
 			$summary[ $dynamic ? 'dynamic' : 'assigned' ]++;
 			$summary['nested']        += $row['isNested'] ? 1 : 0;
 			$summary['empty']         += $row['isEmpty'] ? 1 : 0;
@@ -179,6 +215,21 @@ final class Groups extends Report_Base {
 		}
 		usort( $rows, fn( $a, $b ) => strcasecmp( $a['name'], $b['name'] ) );
 
-		return [ 'rows' => $rows, 'summary' => $summary, '_meta' => [ 'rows' => count( $rows ) ] ];
+		// A missing or denied count is not evidence that no group met the criterion.
+		$coverage = [ 'members' => 0, 'nestedGroups' => 0, 'composition' => 0, 'owners' => 0, 'eligibleOwners' => 0 ];
+		foreach ( $rows as $row ) {
+			$coverage['members'] += null !== $row['members'] ? 1 : 0;
+			$coverage['nestedGroups'] += null !== $row['nestedGroups'] ? 1 : 0;
+			$coverage['composition'] += 'Desconhecido' !== $row['composition'] ? 1 : 0;
+			$coverage['eligibleOwners'] += $row['ownersApplicable'] ? 1 : 0;
+			$coverage['owners'] += $row['ownersApplicable'] && null !== $row['owners'] ? 1 : 0;
+		}
+		foreach ( [ 'empty' => 'members', 'nested' => 'nestedGroups', 'usersOnly' => 'composition', 'devicesOnly' => 'composition', 'mixed' => 'composition', 'noOwner' => 'owners' ] as $metric => $basis ) {
+			$expected = 'owners' === $basis ? $coverage['eligibleOwners'] : count( $rows );
+			if ( ! empty( $state['inventory'] ) || $coverage[ $basis ] < $expected ) {
+				$summary[ $metric ] = null;
+			}
+		}
+		return [ 'rows' => $rows, 'summary' => $summary, 'countsRequested' => empty( $state['inventory'] ), 'coverage' => $coverage, '_meta' => [ 'rows' => count( $rows ) ] ];
 	}
 }

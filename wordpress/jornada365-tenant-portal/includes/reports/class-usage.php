@@ -15,6 +15,13 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Usage extends Report_Base {
 
+	private const SERVICES = [
+		'exchange' => 'Exchange',
+		'teams' => 'Teams',
+		'sharePoint' => 'SharePoint',
+		'oneDrive' => 'OneDrive',
+	];
+
 	public function normalize_params( array $params ): array {
 		$period = $params['period'] ?? 'D30';
 		$period = in_array( $period, [ 'D7', 'D30', 'D90', 'D180' ], true ) ? $period : 'D30';
@@ -47,7 +54,7 @@ final class Usage extends Report_Base {
 		$teams = str_starts_with( $fn, 'getTeams' );
 		$columns = $teams
 			? [ 'userPrincipalName', 'teamChatMessageCount', 'privateChatMessageCount', 'meetingCount', 'callCount', 'lastActivityDate', 'reportRefreshDate' ]
-			: [ 'userPrincipalName', 'displayName', 'isDeleted', 'assignedProducts', 'exchangeLastActivityDate', 'oneDriveLastActivityDate', 'sharePointLastActivityDate', 'teamsLastActivityDate', 'hasTeamsLicense', 'hasExchangeLicense', 'reportRefreshDate' ];
+			: [ 'userPrincipalName', 'displayName', 'isDeleted', 'assignedProducts', 'exchangeLastActivityDate', 'oneDriveLastActivityDate', 'sharePointLastActivityDate', 'teamsLastActivityDate', 'hasTeamsLicense', 'hasExchangeLicense', 'hasOneDriveLicense', 'hasSharePointLicense', 'reportRefreshDate' ];
 		try {
 			return $this->graph->get_report_csv( '/v1.0/reports/' . $fn, $columns );
 		} catch ( Graph_Exception $e ) {
@@ -64,75 +71,136 @@ final class Usage extends Report_Base {
 	}
 
 	public function finalize( array $state, array $params ): array {
-		$active    = $state['active'] ?? [];
-		$teams     = $state['teams'] ?? [];
-		$concealed = false;
-		$refresh   = '';
-
-		$teamsByUpn = [];
-		foreach ( $teams as $t ) {
-			$teamsByUpn[ strtolower( (string) ( $t['userPrincipalName'] ?? '' ) ) ] = [
-				'messages' => (int) ( $t['teamChatMessageCount'] ?? 0 ) + (int) ( $t['privateChatMessageCount'] ?? 0 ),
-				'meetings' => (int) ( $t['meetingCount'] ?? 0 ),
-				'calls'    => (int) ( $t['callCount'] ?? 0 ),
-			];
-		}
-
-		$rows = [];
-		foreach ( $active as $u ) {
-			$upn = (string) ( $u['userPrincipalName'] ?? '' );
-			if ( self::concealed_id( $upn ) ) {
-				$concealed = true;
+		$active = $state['active'] ?? [];
+		$period = $this->normalize_params( $params )['period'];
+		$refresh_dates = [];
+		foreach ( $active as $row ) {
+			$date = self::valid_day( $row['reportRefreshDate'] ?? '' );
+			if ( $date ) {
+				$refresh_dates[ $date ] = true;
 			}
-			$ap = $u['assignedProducts'] ?? '';
-			// The CSV separates products with "+" (JSON output: an array); names come in upper case — use Microsoft's casing.
-			// Products are joined with "+" ("A+B"), but names may contain " + " ("ENTERPRISE MOBILITY + SECURITY E3").
-			$list     = is_array( $ap ) ? $ap : ( '' === trim( (string) $ap ) ? [] : (array) preg_split( '/(?<!\s)\+(?!\s)/', (string) $ap ) );
-			$products = array_values( array_filter( array_map( static fn( $p ) => \J365TP\Sku_Catalog::product( (string) $p ), $list ) ) );
-			$refresh  = $refresh ?: (string) ( $u['reportRefreshDate'] ?? '' );
-			$t        = $teamsByUpn[ strtolower( $upn ) ] ?? null;
-			$row      = [
-				'upn'           => $upn,
-				'displayName'   => (string) ( $u['displayName'] ?? '' ),
-				'deleted'       => self::truthy( $u['isDeleted'] ?? null ),
-				'products'      => $products,
-				'exchange'      => (string) ( $u['exchangeLastActivityDate'] ?? '' ),
-				'oneDrive'      => (string) ( $u['oneDriveLastActivityDate'] ?? '' ),
-				'sharePoint'    => (string) ( $u['sharePointLastActivityDate'] ?? '' ),
-				'teams'         => (string) ( $u['teamsLastActivityDate'] ?? '' ),
-				'hasTeams'      => self::truthy( $u['hasTeamsLicense'] ?? null ),
-				'hasExchange'   => self::truthy( $u['hasExchangeLicense'] ?? null ),
-				'teamsMessages' => $t['messages'] ?? null,
-				'teamsMeetings' => $t['meetings'] ?? null,
-				'teamsCalls'    => $t['calls'] ?? null,
-			];
-			$row['noActivity'] = ! $row['exchange'] && ! $row['oneDrive'] && ! $row['sharePoint'] && ! $row['teams'];
-			$rows[]            = $row;
 		}
-
-		$live    = array_values( array_filter( $rows, static fn( $r ) => ! $r['deleted'] ) );
-		$count   = static fn( callable $f ) => count( array_filter( $live, $f ) );
-		$summary = [
-			'users'                 => count( $live ),
-			'deleted'               => count( $rows ) - count( $live ),
-			'activeExchange'        => $count( static fn( $r ) => $r['exchange'] ),
-			'activeOneDrive'        => $count( static fn( $r ) => $r['oneDrive'] ),
-			'activeSharePoint'      => $count( static fn( $r ) => $r['sharePoint'] ),
-			'activeTeams'           => $count( static fn( $r ) => $r['teams'] ),
-			'licensedExchange'      => $count( static fn( $r ) => $r['hasExchange'] ),
-			'licensedTeams'         => $count( static fn( $r ) => $r['hasTeams'] ),
-			'teamsLicensedInactive' => $count( static fn( $r ) => $r['hasTeams'] && ! $r['teams'] ),
-			'licensedNoActivity'    => $count( static fn( $r ) => $r['products'] && $r['noActivity'] ),
-			'period'                => $params['period'] ?? 'D30',
-			'refreshDate'           => $refresh,
-		];
-
-		return [
-			'rows'    => $rows,
-			'summary' => $summary,
-			'_meta'   => [ 'rows' => count( $rows ), 'concealed' => $concealed, 'warnings' => $state['_warnings'] ?? [] ],
-		];
+		// A CSV represents one snapshot. Conflicting refresh dates cannot define one reporting window.
+		$end = 1 === count( $refresh_dates ) ? (string) array_key_first( $refresh_dates ) : '';
+		$start = '';
+		if ( $end ) {
+			$day = new \DateTimeImmutable( $end, new \DateTimeZone( 'UTC' ) );
+			$start = $day->modify( '-' . ( (int) substr( $period, 1 ) - 1 ) . ' days' )->format( 'Y-m-d' );
+		}
+		$services = [];
+		foreach ( self::SERVICES as $key => $name ) {
+			$services[ $key ] = [ 'name' => $name, 'key' => $key, 'licensed' => 0, 'active' => 0, 'inactive' => 0, 'unknown' => 0, 'unknownLicense' => 0 ];
+		}
+		$summary = [ 'users' => 0, 'eligible' => 0, 'activeUsers' => 0, 'licensedNoActivity' => 0, 'insufficient' => 0, 'deleted' => 0, 'unknownAccount' => 0, 'period' => $period, 'startDate' => $start, 'refreshDate' => $end ];
+		$teams_by_upn = [];
+		foreach ( $state['teams'] ?? [] as $t ) {
+			$key = strtolower( trim( (string) ( $t['userPrincipalName'] ?? '' ) ) );
+			if ( '' !== $key ) {
+				$teams_by_upn[ $key ] = $t;
+			}
+		}
+		$rows = [];
+		$concealed = false;
+		foreach ( $active as $u ) {
+			$upn = trim( (string) ( $u['userPrincipalName'] ?? '' ) );
+			$concealed = $concealed || self::concealed_id( $upn );
+			$product_field = $u['assignedProducts'] ?? '';
+			// Products are joined with "+"; " + " can be part of a product name.
+			$list = is_array( $product_field ) ? $product_field : preg_split( '/(?<!\s)\+(?!\s)/', trim( (string) $product_field ), -1, PREG_SPLIT_NO_EMPTY );
+			$deleted = self::flag( $u['isDeleted'] ?? null );
+			$t = $teams_by_upn[ strtolower( $upn ) ] ?? [];
+			$channel = self::metric( $t['teamChatMessageCount'] ?? null );
+			$private = self::metric( $t['privateChatMessageCount'] ?? null );
+			$row = [
+				'upn' => $upn, 'displayName' => (string) ( $u['displayName'] ?? '' ), 'deleted' => $deleted,
+				'products' => array_values( array_filter( array_map( static fn( $p ) => \J365TP\Sku_Catalog::product( (string) $p ), $list ) ) ),
+				'teamsMessages' => null !== $channel && null !== $private ? $channel + $private : null,
+				'teamsMeetings' => self::metric( $t['meetingCount'] ?? null ), 'teamsCalls' => self::metric( $t['callCount'] ?? null ),
+				'teamsRefreshDate' => self::valid_day( $t['reportRefreshDate'] ?? '' ),
+				'serviceStatus' => [],
+			];
+			foreach ( self::SERVICES as $key => $name ) {
+				$licensed = self::flag( $u[ 'has' . $name . 'License' ] ?? null );
+				$activity = $key . 'LastActivityDate';
+				$last = trim( (string) ( $u[ $activity ] ?? '' ) );
+				$status = 'unlicensed';
+				if ( null === $licensed ) {
+					$status = 'unknownLicense';
+				} elseif ( $licensed ) {
+					if ( ! $end || ! array_key_exists( $activity, $u ) || ( '' !== $last && ( ! self::valid_day( $last ) || $last > $end ) ) ) {
+						$status = 'unknown';
+					} else {
+						$status = $last >= $start ? 'active' : 'inactive';
+					}
+				}
+				$row[ $key ] = self::valid_day( $last );
+				$row[ 'has' . $name ] = $licensed;
+				$row['serviceStatus'][ $key ] = $status;
+				if ( false === $deleted && 'unlicensed' !== $status ) {
+					++$services[ $key ][ $status ];
+					if ( true === $licensed ) {
+						++$services[ $key ]['licensed'];
+					}
+				}
+			}
+			$statuses = $row['serviceStatus'];
+			$eligible = (bool) array_intersect( [ 'active', 'inactive', 'unknown' ], $statuses );
+			$incomplete = (bool) array_intersect( [ 'unknown', 'unknownLicense' ], $statuses );
+			$row['usageStatus'] = 'unlicensed';
+			if ( true === $deleted ) {
+				$row['usageStatus'] = 'deleted';
+				++$summary['deleted'];
+			} elseif ( null === $deleted ) {
+				$row['usageStatus'] = 'unknownAccount';
+				++$summary['unknownAccount'];
+			} else {
+				++$summary['users'];
+				$summary['eligible'] += (int) $eligible;
+				if ( in_array( 'active', $statuses, true ) ) {
+					$row['usageStatus'] = 'active';
+					++$summary['activeUsers'];
+				} elseif ( $incomplete ) {
+					$row['usageStatus'] = 'unknown';
+					$summary['insufficient'] += (int) $eligible;
+				} elseif ( $eligible ) {
+					$row['usageStatus'] = 'inactive';
+					++$summary['licensedNoActivity'];
+				}
+			}
+			$row['noActivity'] = 'inactive' === $row['usageStatus'];
+			$rows[] = $row;
+		}
+		foreach ( $services as &$service ) {
+			$service['pct'] = $service['licensed'] && ! $service['unknown'] ? 100 * $service['active'] / $service['licensed'] : null;
+			$summary[ 'active' . $service['name'] ] = $service['active'];
+			$summary[ 'licensed' . $service['name'] ] = $service['licensed'];
+		}
+		unset( $service );
+		$summary['services'] = array_values( $services );
+		$summary['teamsLicensedInactive'] = $services['teams']['inactive'];
+		return [ 'rows' => $rows, 'summary' => $summary, '_meta' => [ 'rows' => count( $rows ), 'concealed' => $concealed, 'warnings' => $state['_warnings'] ?? [] ] ];
 	}
+
+	private static function valid_day( $value ): string {
+		$value = trim( (string) $value );
+		if ( ! preg_match( '/^(\d{4})-(\d{2})-(\d{2})$/D', $value, $m ) || ! checkdate( (int) $m[2], (int) $m[3], (int) $m[1] ) ) {
+			return '';
+		}
+		return $value;
+	}
+
+	private static function metric( $value ): ?int {
+		return is_scalar( $value ) && ctype_digit( (string) $value ) ? (int) $value : null;
+	}
+
+	private static function flag( $value ): ?bool {
+		return match ( strtolower( trim( (string) $value ) ) ) {
+			'true', '1', 'yes' => true,
+			'false', '0', 'no' => false,
+			default => false === $value ? false : null,
+		};
+	}
+
 
 	/**
 	 * Microsoft conceals names in usage reports by default (Microsoft 365 admin center → Settings → Org
@@ -140,9 +208,5 @@ final class Usage extends Report_Base {
 	 */
 	public static function concealed_id( string $upn ): bool {
 		return '' !== $upn && ! str_contains( $upn, '@' ) && (bool) preg_match( '/^[0-9A-F]{32,64}$/i', $upn );
-	}
-
-	private static function truthy( $v ): bool {
-		return true === $v || 1 === $v || ( is_string( $v ) && in_array( strtolower( trim( $v ) ), [ 'true', '1', 'yes' ], true ) );
 	}
 }

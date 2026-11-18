@@ -85,14 +85,17 @@
   function nav() {
     const links = h('nav', { class: 'nav-links', 'aria-label': 'Seções' },
       h('a', { href: '#como-funciona' }, 'Como funciona'), h('a', { href: '#relatorios' }, 'Relatórios'), h('a', { href: '#seguranca' }, 'Segurança'), h('a', { href: '#faq' }, 'Perguntas'));
-    const mark = CFG.logo?.light || BRAND === APP ? logo('nav-logo') : h('b', { class: 'entry-brand-name' }, raw(BRAND));
+    const mark = brandMark('nav-logo');
     return h('header', { class: 'lx-nav' },
       h('a', { class: 'brand', href: '#top', 'aria-label': BRAND }, mark),
       links, h('div', { class: 'nav-tools' }, langSwitch(), themeToggle(), h('div', { class: 'nav-cta' }, signInButton('sm'))));
   }
 
+  function brandMark(cls) {
+    return CFG.logo?.light || BRAND === APP ? logo(cls) : h('b', { class: 'entry-brand-name' }, raw(BRAND));
+  }
+
   function hero(message) {
-    const title = t('Relatórios do Microsoft 365').replace('Microsoft 365', 'Microsoft\u00a0365');
     const entry = h('section', { class: 'entry-card hero-cta', id: 'entrada', 'aria-labelledby': 'entry-title' },
       h('div', { class: 'entry-heading' }, h('span', { class: 'entry-lock', 'aria-hidden': 'true' }, ic('lock')), h('h2', { id: 'entry-title' }, 'Acessar o portal')));
     if (PER) {
@@ -104,14 +107,17 @@
         CFG.setup?.can ? 'Configure o aplicativo desta instalação para liberar o acesso ao portal.' : 'Portal em configuração. O login estará disponível em breve.'),
         signInButton('lg'));
     }
-    return h('section', { class: 'lx-hero', id: 'top', 'aria-labelledby': 'public-title' },
+    return h('section', { class: 'lx-hero entry-studio', id: 'top', 'aria-labelledby': 'public-title' },
       h('div', { class: 'hero-copy' },
         h('p', { class: 'entry-brand' }, raw(BRAND)),
-        h('h1', { id: 'public-title' }, raw(title)),
-        h('p', { class: 'lead' }, 'Consulte identidades, licenças e dispositivos com dados do Microsoft Graph. Exporte para Excel ou CSV.'),
+        h('h1', { id: 'public-title' }, raw(t('Relatórios do Microsoft 365').replace('Microsoft 365', 'Microsoft\u00a0365'))),
+        h('p', { class: 'lead' }, 'Revise quem tem acesso, quais licenças estão em uso e como os dispositivos da sua organização são gerenciados.'),
         message ? h('div', { class: 'entry-message note warn', role: 'alert' }, message) : null),
       entry, h('div', { class: 'entry-links' }, h('a', { href: '#relatorios' }, 'Explorar relatórios', ic('down')),
-        h('a', { href: SOURCE, target: '_blank', rel: 'noopener' }, 'Código aberto no GitHub', ic('ext'))));
+        h('a', { href: SOURCE, target: '_blank', rel: 'noopener' }, 'Código aberto no GitHub', ic('ext'))),
+      h('nav', { class: 'entry-topics', 'aria-label': 'Destaques do catálogo' },
+        ...[['people_team', 'Identidades', 'people_team'], ['data_trending', 'Uso e adoção', 'data_trending'], ['phone_laptop', 'Dispositivos', 'phone_laptop']].map(([graphic, label, id]) =>
+          h('a', { href: '#report-' + id }, fi(graphic), h('span', null, label), ic('arrow')))));
   }
 
   function steps() {
@@ -148,7 +154,7 @@
   }
 
   function bento() {
-    const tiles = REPORTS.map((r, i) => h('article', { class: 'tile spot', style: `--d:${(i % 8) + 1}`, title: t(r.tag) },
+    const tiles = REPORTS.map((r, i) => h('article', { class: 'tile spot', id: 'report-' + r.icon, tabindex: '-1', style: `--d:${(i % 8) + 1}`, title: t(r.tag) },
       h('span', { class: 'tile-ic' }, fi(r.icon)),
       h('div', { class: 'tile-txt' }, h('h3', null, r.title), h('p', null, r.text))));
     return h('section', { class: 'lx-section', id: 'relatorios' },
@@ -240,7 +246,7 @@
     return h('footer', { class: 'lx-foot' },
       h('div', { class: 'foot-cta' }, h('h2', null, 'Pronto para ver o seu tenant?'), signInButton('lg'), h('span', { class: 'foot-note' }, ic('cloudoff'), 'Relatórios na sua aba.')),
       h('div', { class: 'foot-row' },
-        h('div', { class: 'foot-brand' }, logo('foot-logo'), h('span', { class: 'tagline' }, raw(BRAND))),
+        h('div', { class: 'foot-brand' }, brandMark('foot-logo')),
         h('div', { class: 'foot-links' },
           h('a', { href: CREATOR.url, target: '_blank', rel: 'noopener' }, 'Criado por', ' ', raw(CREATOR.name)),
           h('a', { href: SOURCE, target: '_blank', rel: 'noopener' }, 'Código-fonte (GPL)'),

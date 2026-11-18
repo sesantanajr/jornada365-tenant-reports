@@ -80,10 +80,11 @@
     let idle = 0;
     const id = job?.job_id;
     for (;;) {
-      if (!id || job?.job_id !== id || !['pending', 'running', 'done', 'error'].includes(job.status)) {
+      if (!id || job?.job_id !== id || !['pending', 'running', 'paused', 'done', 'error'].includes(job.status)) {
         throw new Error(t('O servidor devolveu um estado inválido para o relatório.'));
       }
       onProgress(job.retryAfter > 0 ? { ...job, resumeAt: Date.now() + job.retryAfter * 1000 } : job);
+      if (job.status === 'paused') throw Object.assign(new Error(t(job.message)), { checkpoint: true });
       if (job.status === 'error') throw Object.assign(new Error(t(job.message || 'Falha ao gerar relatório.')), { failure: job.failure });
       if (job.status === 'done') break;
       if (job.retryAfter > 0) {
@@ -1915,8 +1916,10 @@
       graphSource = issue.section?.includes('IdentityRiskEvent.Read.All') ? '/identityProtection/riskDetections' : '/identityProtection/riskyUsers';
     }
     if (type === 'devicescore' && issue.section) {
-      const endpoint = { 'Pontuação do tenant indisponível': 'Overview', 'Referências de comparação indisponíveis': 'Baselines', 'Lista de dispositivos incompleta': 'DeviceScores', 'Histórico de experiência indisponível': 'ScoreHistory' }[issue.section];
-      if (endpoint) graphSource = '/deviceManagement/userExperienceAnalytics' + endpoint;
+      const endpoint = { 'Pontuação do tenant indisponível': 'Overview', 'Resumo alternativo do Intune indisponível': 'Overview', 'Referências de comparação indisponíveis': 'Baselines', 'Categorias das referências indisponíveis': 'Baselines', 'Lista de dispositivos incompleta': 'DeviceScores', 'Histórico de experiência indisponível': 'ScoreHistory', 'Categoria de confiabilidade indisponível': 'AppHealthOverview' }[issue.section];
+      const version = issue.section === 'Resumo alternativo do Intune indisponível' ? '/beta' : '/v1.0';
+      if (endpoint) graphSource = version + '/deviceManagement/userExperienceAnalytics' + endpoint;
+      if (issue.section === 'Detalhes da referência indisponíveis') graphSource = '/v1.0/deviceManagement/userExperienceAnalyticsBaselines/{id}';
     }
     if (graphSource && ['access', 'license', 'request', 'unavailable', 'authorization'].includes(issue.kind)) diagnosis.push(graphSource);
     if (diagnosis.length) {
@@ -2010,6 +2013,13 @@
         bar.style.display = 'none';
         status.textContent = lastGenerated ? t('Exibindo a última consulta concluída em {s}.', { s: lastGenerated }) : '';
         if (!lastGenerated) body.replaceChildren();
+        if (e.checkpoint) {
+          feedback.hidden = false;
+          feedback.append(h('div', { class: 'alert warn', role: 'status' }, h('p', null, e.message),
+            h('button', { type: 'button', class: 'btn sm', onclick: () => App.go('activity') }, 'Abrir Meus relatórios')));
+          PANEL_META.set(panel, { ...PANEL_META.get(panel), ...(lastGenerated ? { coverageNote: e.message } : { error: e.message }) });
+          return;
+        }
         const issue = signal.aborted ? { kind: 'cancelled' } : readIssue(e);
         const notice = reportNotice(type, issue, e.message, opts.graphSource);
         if (['access', 'license', 'consent', 'authorization'].includes(issue.kind)) {
@@ -2463,9 +2473,9 @@
   };
   function deviceScoreAdvice(kinds, sections) {
     const steps = [];
-    if (kinds.includes('unavailable')) steps.push(sections.every(section => section === 'Referências de comparação indisponíveis')
+    if (kinds.includes('unavailable')) steps.push(sections.every(section => ['Referências de comparação indisponíveis', 'Categorias das referências indisponíveis', 'Detalhes da referência indisponíveis'].includes(section))
       ? 'No Intune, abra Endpoint Analytics → Configurações → Referências e confira quais comparações estão disponíveis para a empresa.'
-      : 'No centro de administração do Intune, abra Relatórios → Endpoint Analytics → Visão geral. Confirme a ativação e a atribuição da política de coleta aos dispositivos Windows elegíveis.');
+      : 'No Intune, compare a Visão geral com o escopo Todos os dispositivos na mesma organização. Se o Intune já mostra pontuações, consulte o diagnóstico da fonte do Graph. O Configuration Manager é opcional para equipamentos gerenciados pelo Intune.');
     if (kinds.includes('consent') || kinds.includes('access')) {
       steps.push('Confira o consentimento para DeviceManagementManagedDevices.Read.All no aplicativo da empresa conectada.');
       if ((App.me?.permissions?.mode || CFG.tenancy) === 'per_tenant') steps.push('Para uma função personalizada no Intune, confira Endpoint Analytics/Read, Organization/Read e Managed Devices/Read, além do escopo de dispositivos da conta.');
@@ -2509,6 +2519,32 @@
     }, { subtitle: 'Equipamentos avaliados pelo Endpoint Analytics. Os indicadores contam as linhas retornadas; cada pontuação varia de 0 a 100 pontos.', icon: 'device', graphSource: '/deviceManagement/userExperienceAnalyticsDeviceScores' });
   }
 
+  function deviceScoreComparison(base, org) {
+    const currentMetrics = new Map(org?.source === 'history' ? [] : (org?.metrics || []).map(row => [row.metric, row.score]));
+    const rows = base.flatMap(baseline => Object.entries(baseline.metrics || {}).filter(([, value]) => hasDeviceScore(value)).map(([key, reference]) => {
+      const current = currentMetrics.get(key);
+      return { name: baseline.name || baseline.id, category: t(DEVICE_SCORE_METRICS[key] || key), reference,
+        current, difference: hasDeviceScore(current) ? Number((current - reference).toFixed(2)) : null };
+    }));
+    if (!rows.length) return null;
+    return DataTable({ rows, name: 'comparacao-categorias', sheet: 'Comparação por categoria', compact: true,
+      facets: [{ key: 'name', label: 'Referência de comparação' }], columns: [
+        { key: 'name', label: 'Referência de comparação' }, { key: 'category', label: 'Categoria' },
+        scoreColumn('reference', 'Referência (pontos)'), scoreColumn('current', 'Tenant atual (pontos)'),
+        { key: 'difference', label: 'Diferença do tenant (pontos)', render: row => Number.isFinite(row.difference) ? raw(num(row.difference)) : '—', export: row => row.difference },
+      ] });
+  }
+
+  function openScoreBaseline(id, name) {
+    const title = t('Detalhes da referência');
+    modal(name || title, reportPanel('devicescore', { section: 'baseline', id }, title, p => {
+      const rows = p.rows || [], box = h('div'), baseline = rows[0];
+      if (hasDeviceScore(baseline?.score)) box.append(kpis([{ label: 'Referência (pontos)', value: baseline.score }]));
+      box.append(deviceScoreComparison(rows, App.cache['devicescore{}']?.overview) || h('p', { class: 'muted' }, 'O Intune não retornou pontuações por categoria para esta referência.'));
+      return box;
+    }, { graphSource: '/v1.0/deviceManagement/userExperienceAnalyticsBaselines/{id}' }));
+  }
+
   views.devicescore = () => {
     const root = h('div'), exported = Array.isArray(App.harvesting);
     const detail = h('div', { class: 'device-score-detail' });
@@ -2525,6 +2561,8 @@
       const base = p.rows || [], org = p.overview, metrics = org?.metrics || [], box = h('div');
       const median = base.find(row => row.builtIn === true);
       const historical = org?.source === 'history';
+      if (org?.source === 'beta') box.append(h('p', { class: 'muted small' }, 'Resumo atual obtido pelo Microsoft Graph beta. A leitura v1.0 não retornou o resumo.'));
+      if (org?.source === 'appCategory') box.append(h('p', { class: 'muted small' }, 'O Intune retornou a confiabilidade de aplicativos. A pontuação geral da organização continua indisponível.'));
       const delta = value => !historical && hasDeviceScore(org?.score) && hasDeviceScore(value) ? Number((org.score - value).toFixed(2)) : null;
       const cards = [
         hasDeviceScore(org?.score) && { label: historical ? 'Pontuação histórica (0–100)' : 'Experiência do tenant (0–100)', value: org.score },
@@ -2555,8 +2593,12 @@
             export: row => row.builtIn === true ? t('Mediana das organizações') : row.builtIn === false ? t('Referência personalizada') : null },
           scoreColumn('score', 'Referência (pontos)'), ...(!historical && hasDeviceScore(org?.score) ? [{ key: 'delta', label: 'Diferença do tenant (pontos)', render: row => raw(num(delta(row.score))), export: row => delta(row.score) }] : []),
           { key: 'created', label: 'Criado em', render: row => row.builtIn ? '—' : fmtDate(row.created), export: row => row.builtIn ? null : row.created },
+          ...(!exported && base.some(row => row.id && !Object.keys(row.metrics || {}).length) ? [{ key: 'details', label: '',
+            render: row => row.id && !Object.keys(row.metrics || {}).length ? h('button', { type: 'button', class: 'btn sm', onclick: () => openScoreBaseline(row.id, row.name) }, 'Consultar categorias') : '—' }] : []),
         ] }));
       else if (org && !p.partial) box.append(h('p', { class: 'muted small' }, 'O Intune não retornou referências de comparação.'));
+      const comparison = deviceScoreComparison(base, org);
+      if (comparison) box.append(h('h3', null, 'Comparação por categoria'), comparison);
       return box;
     }, { subtitle: 'Experiência dos dispositivos Windows segundo o Intune Endpoint Analytics, de 0 a 100 pontos. Valores maiores indicam melhor experiência.', icon: 'gauge',
       graphSource: '/deviceManagement/userExperienceAnalyticsOverview /deviceManagement/userExperienceAnalyticsBaselines',
@@ -2907,8 +2949,34 @@
   } });
 
   /* Groups */
-  views.groups = () => reportPanel('groups', {}, 'Grupos', (p) => {
+  const groupCountFields = { members: 'Membros', users: 'Usuários', nestedGroups: 'Grupos aninhados', devices: 'Dispositivos', others: 'Outros (SP/contatos)', owners: 'Proprietários', composition: 'Composição' };
+  const groupCountFilters = new Set(['nested', 'empty', 'users', 'devices', 'mixed', 'withobj', 'noowner']);
+  function groupCountPanel(groupId) {
+    return reportPanel('groups', { groupId }, 'Membros e proprietários', (p) => DataTable({
+      rows: p.rows, name: 'grupo-contagens', sheet: 'Membros e proprietários', compact: true,
+      columns: [{ key: 'name', label: 'Grupo' }, ...Object.entries(groupCountFields).map(([key, label]) => ({ key, label, render: r => key === 'composition' ? t(r[key]) : num(r[key]) })), { key: 'id', label: 'Object ID', exportOnly: true }],
+    }));
+  }
+  function groupDetail(r, countsRequested) {
+    const fields = [['Object ID', r.id], ['Descrição', r.description], ['Tipo', r.type], ['Origem', r.source + (r.onPremDomain ? ` (${r.onPremDomain})` : '')], ['Associação', r.membership], ['Regra', r.rule], ['Estado da regra', r.ruleState],
+      ['Atribuível a função', yesNo(r.roleAssignable)], ['Team', yesNo(r.isTeam)], ['Visibilidade', r.visibility], ['E-mail', r.mail], ['Criado', fmtDate(r.created)], ['Último sync AD', fmtDate(r.lastSync)], ['Expiração', fmtDate(r.expiration)]];
+    const body = h('div');
+    if (countsRequested) fields.push(...Object.entries(groupCountFields).map(([key, label]) => [label, key === 'composition' ? r[key] : num(r[key])]));
+    body.append(kv(fields));
+    if (!countsRequested) {
+      const details = h('div');
+      const load = h('button', { class: 'btn', type: 'button', onclick: () => details.replaceChildren(groupCountPanel(r.id)) }, 'Consultar contagens deste grupo');
+      details.append(load);
+      body.append(details);
+    }
+    return modal(r.name, body);
+  }
+  views.groups = () => {
+    const full = App.params.groupCounts === true;
+    const switchMode = h('button', { class: 'btn sm glass', type: 'button', onclick: () => { App.params.groupCounts = !full; App.go('groups'); } }, full ? 'Voltar ao inventário' : 'Contar membros e proprietários de todos os grupos');
+    return reportPanel('groups', full ? { counts: 'all' } : {}, 'Grupos', (p) => {
     const s = p.summary, box = h('div');
+    const counts = p.countsRequested !== false;
     const cols = [
       { key: 'name', label: 'Grupo', wrap: true }, { key: 'type', label: 'Tipo' }, { key: 'source', label: 'Origem', render: (r) => badge(r.source, r.source === 'Cloud-only' ? 'ok' : 'info') }, { key: 'membership', label: 'Associação' },
       { key: 'members', label: 'Membros', render: (r) => num(r.members) }, { key: 'users', label: 'Usuários', render: (r) => num(r.users) }, { key: 'nestedGroups', label: 'Grupos aninhados', render: (r) => r.nestedGroups ? badge(num(r.nestedGroups), 'warn') : num(r.nestedGroups) }, { key: 'devices', label: 'Dispositivos', render: (r) => num(r.devices) }, { key: 'others', label: 'Outros (SP/contatos)', render: (r) => num(r.others) },
@@ -2918,27 +2986,35 @@
       { key: 'onPremDomain', label: 'Domínio do AD', exportOnly: true }, { key: 'lastSync', label: 'Último sync do AD', exportOnly: true, export: (r) => r.lastSync },
       { key: 'expiration', label: 'Expiração', exportOnly: true, export: (r) => r.expiration }, { key: 'id', label: 'Object ID', exportOnly: true },
     ];
-    const table = DataTable({ rows: p.rows, columns: cols, name: 'grupos', onRowClick: (r) => modal(r.name, kv([['Object ID', r.id], ['Descrição', r.description], ['Tipo', r.type], ['Origem', r.source + (r.onPremDomain ? ` (${r.onPremDomain})` : '')], ['Associação', r.membership], ['Regra', r.rule], ['Estado da regra', r.ruleState], ['Membros totais', num(r.members)], ['Usuários', num(r.users)], ['Grupos aninhados', num(r.nestedGroups)], ['Dispositivos', num(r.devices)], ['Outros', num(r.others)], ['Proprietários', num(r.owners)], ['Composição', r.composition], ['Atribuível a função', yesNo(r.roleAssignable)], ['Team', yesNo(r.isTeam)], ['Visibilidade', r.visibility], ['E-mail', r.mail], ['Criado', fmtDate(r.created)], ['Último sync AD', fmtDate(r.lastSync)], ['Expiração', fmtDate(r.expiration)]])), filters: [
+    const table = DataTable({ rows: p.rows, columns: cols.filter(col => counts || !(col.key in groupCountFields)), name: 'grupos', onRowClick: (r) => groupDetail(r, counts), filters: [
       { id: 'synced', label: 'AD sincronizados', fn: (r) => r.source !== 'Cloud-only' }, { id: 'cloud', label: 'Cloud-only', fn: (r) => r.source === 'Cloud-only' }, { id: 'nested', label: 'Com grupos aninhados', fn: (r) => r.isNested }, { id: 'empty', label: 'Vazios', fn: (r) => r.isEmpty },
       { id: 'users', label: 'Somente usuários', fn: (r) => r.composition === 'Somente usuários' }, { id: 'devices', label: 'Somente dispositivos', fn: (r) => r.composition === 'Somente dispositivos' }, { id: 'mixed', label: 'Mistos', fn: (r) => r.composition === 'Misto' }, { id: 'withobj', label: 'Com objetos', fn: (r) => r.members > 0 },
       { id: 'dynamic', label: 'Dinâmicos', fn: (r) => r.membership === 'Dinâmico' }, { id: 'm365', label: 'Microsoft 365', fn: (r) => r.type === 'Microsoft 365' }, { id: 'sec', label: 'Segurança', fn: (r) => r.type.startsWith('Segurança') }, { id: 'dist', label: 'Distribuição', fn: (r) => r.type === 'Distribuição' }, { id: 'noowner', label: 'Sem proprietário', fn: (r) => r.owners === 0 && r.ownersApplicable !== false }, { id: 'role', label: 'Atribuíveis a função', fn: (r) => r.roleAssignable }, { id: 'teams', label: 'Teams', fn: (r) => r.isTeam },
-    ] });
+    ].filter(filter => counts || !groupCountFilters.has(filter.id)) });
+    if (counts && p.coverage && (p.coverage.composition < p.rows.length || p.coverage.owners < p.coverage.eligibleOwners)) {
+      box.append(h('p', { class: 'alert warn' }, t('Composição conhecida em {a} de {b} grupos. Proprietários consultados em {c} de {d} grupos elegíveis. Totais incompletos aparecem como travessão.', {
+        a: num(p.coverage.composition), b: num(p.rows.length), c: num(p.coverage.owners), d: num(p.coverage.eligibleOwners),
+      })));
+    }
     box.append(kpis([
       { label: 'Grupos', value: s.total }, { label: 'AD sincronizados', value: s.synced, onclick: () => table.setFilter('synced') }, { label: 'Cloud-only', value: s.cloudOnly, cls: 'ok', onclick: () => table.setFilter('cloud') }, { label: 'Microsoft 365', value: s.m365, onclick: () => table.setFilter('m365') }, { label: 'Segurança', value: s.security + s.mailSecurity, onclick: () => table.setFilter('sec') }, { label: 'Distribuição', value: s.distribution, onclick: () => table.setFilter('dist') },
       { label: 'Dinâmicos', value: s.dynamic, onclick: () => table.setFilter('dynamic') }, { label: 'Com aninhamento', value: s.nested, cls: 'warn', onclick: () => table.setFilter('nested') }, { label: 'Vazios', value: s.empty, cls: 'danger', onclick: () => table.setFilter('empty') }, { label: 'Só usuários', value: s.usersOnly, onclick: () => table.setFilter('users') }, { label: 'Só dispositivos', value: s.devicesOnly, onclick: () => table.setFilter('devices') }, { label: 'Mistos', value: s.mixed, onclick: () => table.setFilter('mixed') }, { label: 'Sem proprietário', value: s.noOwner, cls: 'warn', onclick: () => table.setFilter('noowner') }, { label: 'Atribuíveis a função', value: s.roleAssignable, cls: 'danger', onclick: () => table.setFilter('role') }, { label: 'Teams', value: s.teams, onclick: () => table.setFilter('teams') },
-    ]));
+    ].filter(kpi => counts || kpi.value != null)));
     if (p.rows.length) {
       box.append(vizRow(
         vizCard('Por tipo', donut(countBy(p.rows, (r) => r.type, { limit: 5, label: (k) => t(k) }).map(([l, v, k]) => [l, v, k && k !== '\u0000' ? () => table.setMatch('type', k, k) : null]), { centerLabel: t('grupos'), key: 'type' })),
         vizCard('Origem', donut([['AD sincronizado', s.synced, () => table.setFilter('synced')], ['Cloud-only', s.cloudOnly, () => table.setFilter('cloud')]], { centerLabel: t('grupos'), key: 'source' })),
-        vizCard('Composição', donut(countBy(p.rows, (r) => r.composition, { limit: 6, label: (k) => t(k) }).map(([l, v, k]) => [l, v, k && k !== '\u0000' ? () => table.setMatch('composition', k, k) : null, k === 'Vazio' ? 'danger' : k === 'Misto' ? 'warn' : null]), { centerLabel: t('grupos'), key: 'composition' }))));
+        counts ? vizCard('Composição', donut(countBy(p.rows, (r) => r.composition, { limit: 6, label: (k) => t(k) }).map(([l, v, k]) => [l, v, k && k !== '\u0000' ? () => table.setMatch('composition', k, k) : null, k === 'Vazio' ? 'danger' : k === 'Misto' ? 'warn' : null]), { centerLabel: t('grupos'), key: 'composition' })) : null));
     }
     box.append(table);
     return box;
-  }, { subtitle: 'Compare o número de membros por grupo e encontre grupos vazios ou sem proprietário.', ring: (p) => {
-    const app = p.rows.filter((r) => r.ownersApplicable !== false), ok = app.filter((r) => r.owners > 0).length, pc = pctOf(ok, app.length);
-    return app.length ? { pct: pc, label: 'dos grupos com proprietário', caption: t('{n} vazios', { n: num(p.summary.empty) }), tone: toneFor(pc, 90, 75) } : null;
+  }, { controls: switchMode, subtitle: full ? 'Compare o número de membros por grupo e encontre grupos vazios ou sem proprietário.' : 'Consulte tipo, origem e associação. Abra um grupo para contar seus membros e proprietários.', ring: (p) => {
+    const app = p.rows.filter((r) => r.ownersApplicable !== false);
+    if (p.countsRequested === false || !app.length || app.some(r => r.owners == null)) return null;
+    const pc = pctOf(app.filter((r) => r.owners > 0).length, app.length);
+    return { pct: pc, label: 'dos grupos com proprietário', caption: p.summary.empty == null ? '' : t('{n} vazios', { n: num(p.summary.empty) }), tone: toneFor(pc, 90, 75) };
   } });
+  };
 
   /* Licensing */
   const KIND = { paid: ['Paga', 'info'], free: ['Gratuita', 'ok'], trial: ['Avaliação', 'warn'], nonseat: ['Não por usuário', ''] };
@@ -3304,31 +3380,18 @@
   }
 
   function monthlyScoreChart(months) {
-    const chart = h('div', { class: 'score-days score-months', tabindex: '0', role: 'region', 'aria-label': 'Evolução mensal do Identity Score' });
-    const intl = new Intl.DateTimeFormat(CFG.intl || 'pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' });
-    const label = row => {
-      const parts = intl.formatToParts(new Date(row.month + '-01T00:00:00Z'));
-      return parts.find(p => p.type === 'month').value.replace(/\.$/, '') + '/' + parts.find(p => p.type === 'year').value;
-    };
-    for (let i = 0; i < months.length; ++i) {
-      const row = months[i];
-      if (row.percent == null) {
-        const start = i;
-        while (i + 1 < months.length && months[i + 1].percent == null) i++;
-        const count = i - start + 1;
-        const period = count === 1 ? label(row) : label(row) + ' – ' + label(months[i]);
-        const empty = count === 1 ? t('Mês sem medição') : t('{n} meses sem medição', { n: count });
-        chart.append(h('div', { class: 'score-gap', title: period + ' · ' + empty }, h('strong', null, raw(empty)), h('span', null, raw(period))));
-        continue;
-      }
-      const detail = t('{a} de {b} pontos', { a: num(row.current), b: num(row.max) }) + ' · ' + fmtDay(row.date.slice(0, 10)) + ' UTC · ' + t(row.source);
-      chart.append(h('div', { class: 'score-day', title: row.month + ' · ' + detail }, h('strong', null, raw(scorePercentText(row.percent))), h('span', { class: 'score-track', 'aria-hidden': 'true' }, h('i', { style: 'height:' + row.percent + '%' })), h('span', null, raw(label(row)))));
+    const chart = h('div', { class: 'score-days score-months' });
+    const intl = new Intl.DateTimeFormat(CFG.intl || 'pt-BR', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+    for (const row of months) {
+      const month = intl.format(new Date(row.month + '-01T00:00:00Z'));
+      const measured = row.percent != null;
+      const points = measured ? t('{a} de {b} pontos', { a: num(row.current), b: num(row.max) }) : t('Mês sem medição');
+      chart.append(h('div', { class: 'score-month' },
+        h('time', { datetime: row.month }, raw(month)), h('strong', null, raw(scorePercentText(row.percent))),
+        h('span', { class: 'score-month-track', 'aria-hidden': 'true' }, measured ? h('i', { style: 'width:' + row.percent + '%' }) : null),
+        h('span', { class: 'score-month-points' }, raw(points))));
     }
     BAR_DATA.set(chart, { items: months.map((row) => [row.month, row.percent == null ? null : Number(row.percent.toFixed(2))]), total: null, opts: { kind: 'monthlyScore' } });
-    const count = chart.childElementCount;
-    for (const [size, maximum] of [['wide', 15], ['medium', 9], ['small', 4]]) {
-      chart.style.setProperty('--score-' + size, Math.ceil(count / Math.ceil(count / maximum)));
-    }
     const card = vizCard('Evolução mensal do Identity Score', chart);
     card.classList.add('score-history-card');
     return card;
@@ -3470,7 +3533,6 @@
   const identityScoreReport = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p, ctx) => {
     const box = h('div'), body = h('div'), dailyTable = h('div'), tenantId = String(App.me.tenant.id || '').toLowerCase();
     const end = scoreUtcDay(p._meta?.generated_at) || new Date().toISOString().slice(0, 10);
-    const selector = h('select', { class: 'j365-input', 'aria-label': 'Período do histórico' }, ...[3, 6, 12, 24].map((n) => h('option', { value: n, selected: (App.params.identityMonths || 24) === n }, t('{n} meses', { n }))));
     const monthTitle = 'Fechamento mensal', title = 'Mês (UTC)', scoreTitle = 'Identity Score (%)';
     const columns = [
       { key: 'date', label: 'Data da medição (UTC)', render: (r) => fmtDay(r.date.slice(0, 10)), export: (r) => r.date.slice(0, 10) },
@@ -3482,7 +3544,8 @@
     const sourceTable = h('div');
     function draw() {
       const archive = App.params.identityArchive?.tenantId === tenantId ? App.params.identityArchive.days : [];
-      const count = Number(selector.value), info = scoreCalendar(p.history || [], archive, end, count, p.tracking?.months || []);
+      const info = scoreCalendar(p.history || [], archive, end, 4, p.tracking?.months || []);
+      const count = info.months.length;
       const covered = info.months.filter((m) => m.samples > 0), latest = covered.at(-1);
       const coverage = t('{n} de {m} meses com medição válida.', { n: covered.length, m: count });
       body.replaceChildren(kpis([
@@ -3494,22 +3557,16 @@
       const scope = t('Janela de {start} a {end} (UTC).', { start: info.months[0].month, end: info.months.at(-1).month });
       const direct = info.sources[0];
       const observed = direct.days ? t('Medições do Graph de {start} a {end} (UTC).', { start: fmtDay(direct.first), end: fmtDay(direct.last) }) : t('A consulta ao Graph não retornou uma medição válida nesse período.');
-      if (covered.length < count) body.append(h('div', { class: 'score-coverage-note' }, icon('clock'), h('div', null, h('strong', null, raw(coverage)),
-        h('p', null, raw(observed), ' ', 'O Entra não garante 12 ou 24 meses retroativos. Para completar os meses anteriores, importe medições já arquivadas pela empresa.', ' ',
-          p.tracking?.enabled ? 'O histórico do portal está ativo.' : 'O administrador do tenant pode ativar o histórico do portal para guardar as próximas medições.'))));
-      body.append(monthlyScoreChart(info.months), h('div', { class: 'score-coverage' }, h('p', { class: 'muted small' }, raw(covered.length < count ? scope : scope + ' ' + coverage + ' ' + observed)),
-        covered.length < count && archivePanel ? h('button', { type: 'button', class: 'btn sm', onclick: () => { archivePanel.open = true; archivePanel.querySelector('input').focus(); } }, 'Complementar com arquivos anteriores') : null));
+      body.append(monthlyScoreChart(info.months), h('p', { class: 'score-coverage muted small' }, raw(scope + ' ' + coverage)));
       body.append(h('h3', null, monthTitle), DataTable({ rows: [...info.months].reverse(), name: 'identity-score-monthly', sheet: monthTitle, columns: [{ key: 'month', label: title }, ...columns, { key: 'samples', label: 'Dias com medição' }] }));
       const coverageColumns = [{ key: 'source', label: 'Origem da medição', value: r => t(r.source) },
         { key: 'first', label: 'Primeira medição (UTC)', render: r => fmtDay(r.first) }, { key: 'last', label: 'Última medição (UTC)', render: r => fmtDay(r.last) },
         { key: 'days', label: 'Dias com medição' }, { key: 'observed', label: 'Meses observados' }, { key: 'closings', label: 'Fechamentos usados' }];
-      sourceTable.replaceChildren(DataTable({ rows: info.sources, sheet: 'Cobertura por origem', name: 'identity-score-sources', columns: coverageColumns }));
+      sourceTable.replaceChildren(h('p', { class: 'muted small' }, raw(observed)), DataTable({ rows: info.sources, sheet: 'Cobertura por origem', name: 'identity-score-sources', columns: coverageColumns }));
       dailyTable.replaceChildren(DataTable({ rows: info.daily, name: 'identity-score-history', sheet: 'Histórico da pontuação', columns }));
     }
-    selector.onchange = () => { App.params.identityMonths = Number(selector.value); draw(); };
-    box.append(h('div', { class: 'score-controls' }, h('label', null, 'Período do histórico', selector),
-      tenantId ? scoreTrackingControls(p.tracking, () => App.go('identityscore')) : null,
-      archivePanel), body, h('details', { class: 'score-archive' }, h('summary', null, 'Cobertura por origem'), h('p', null, 'Primeira e última medição válida no período. Um mesmo dia pode existir em mais de uma origem. Cada mês tem no máximo um fechamento.'), sourceTable));
+    box.append(body, h('details', { class: 'score-archive' }, h('summary', null, 'Cobertura por origem'),
+      sourceTable, archivePanel, tenantId ? scoreTrackingControls(p.tracking, () => App.go('identityscore')) : null));
     draw();
     const status = { active: 'Ativa', completedBySystem: 'Concluído pelo sistema', completedByUser: 'Concluído pelo usuário', dismissed: 'Descartada', postponed: 'Adiada', riskAccepted: 'Risco aceito', planned: 'Planejada', thirdParty: 'Resolvido por terceiro', alternateMitigation: 'Mitigação alternativa' };
     const priority = { high: 'Alta', medium: 'Média', low: 'Baixa' };
@@ -3524,64 +3581,81 @@
     }));
     box.append(h('details', { class: 'score-archive' }, h('summary', null, 'Histórico da pontuação'), dailyTable));
     return box;
-  }, { subtitle: 'Acompanhe a evolução mensal e as recomendações de identidade do Microsoft Entra.', tools: entraScoreLink('btn sm glass') });
+  }, { subtitle: 'Consulte a última medição de cada um dos últimos quatro meses e as recomendações do Microsoft Entra.', tools: entraScoreLink('btn sm glass') });
 
   /* M365 usage */
   views.usage = () => {
     const wrap = h('div');
-    const period = h('select', { class: 'j365-input', 'aria-label': 'Período' }, ...['D7', 'D30', 'D90', 'D180'].map((d) => h('option', { value: d, selected: d === (App.params.usagePeriod || 'D30') }, t('{n} dias', { n: d.slice(1) }))));
-    const form = h('form', { class: 'rp-form', onsubmit: (e) => { e.preventDefault(); draw(); } }, h('label', null, h('span', null, 'Período'), period), h('button', { class: 'btn sm glass', type: 'submit' }, 'Aplicar'));
-    const out = wrap;
+    const services = { exchange: 'Exchange', teams: 'Teams', sharePoint: 'SharePoint', oneDrive: 'OneDrive' };
+    const usagePercent = new Intl.NumberFormat(CFG.intl || 'pt-BR', { style: 'percent', maximumFractionDigits: 2 });
+    const statuses = { active: 'Com atividade', inactive: 'Sem atividade no período', unknown: 'Dados insuficientes', unknownAccount: 'Conta sem situação informada', deleted: 'Excluído', unlicensed: 'Sem licença nos quatro serviços' };
+    const period = h('select', { class: 'j365-input', 'aria-label': 'Período' }, ...['D7', 'D30', 'D90', 'D180'].map(d => h('option', { value: d, selected: d === (App.params.usagePeriod || 'D30') }, t('{n} dias', { n: d.slice(1) }))));
+    const form = h('form', { class: 'rp-form', onsubmit: e => { e.preventDefault(); draw(); } }, h('label', null, h('span', null, 'Período'), period), h('button', { class: 'btn sm glass', type: 'submit' }, 'Aplicar'));
+    const present = value => value === null || value === undefined ? '—' : num(value);
+    const status = r => t(statuses[r.usageStatus] || 'Dados insuficientes');
+    const serviceStatus = code => code === 'unlicensed' ? t('Sem licença') : code === 'unknownLicense' ? t('Licença não informada') : t(statuses[code] || 'Dados insuficientes');
     function draw() {
-      out.innerHTML = '';
+      wrap.replaceChildren();
       App.params.usagePeriod = period.value;
-      out.append(reportPanel('usage', { period: period.value }, t('Uso & adoção ({p})', { p: period.value }), (p) => {
-        const s = p.summary, box = h('div');
-        const hidden = !!p._meta.concealed;
-        const pct = (a, b) => (b ? Math.round((100 * a) / b) : null);
-        const adoption = (label, active, licensed, onclick) => ({ label, value: active, cls: '', onclick, title: licensed ? t('{a} de {b} licenciados ({c}%)', { a: num(active), b: num(licensed), c: pct(active, licensed) }) : null });
-        const rows = p.rows || [];
-        const shortId = (v) => (v ? String(v).slice(0, 8).toLowerCase() + '…' : '—');
+      wrap.append(reportPanel('usage', { period: period.value }, 'Uso e adoção', p => {
+        const s = p.summary || {}, rows = p.rows || [], hidden = !!p._meta?.concealed;
+        const box = h('div', { class: 'usage-review' });
+        const current = Array.isArray(s.services);
         App.namesConcealed = hidden;
         if (hidden) box.append(concealedBanner());
-        box.append(kpis([
-          { label: 'Usuários', value: s.users },
-          adoption('Ativos Exchange', s.activeExchange, s.licensedExchange, () => table.setFilter('exch')),
-          adoption('Ativos Teams', s.activeTeams, s.licensedTeams, () => table.setFilter('teams')),
-          { label: 'Ativos SharePoint', value: s.activeSharePoint, onclick: () => table.setFilter('spo') }, { label: 'Ativos OneDrive', value: s.activeOneDrive, onclick: () => table.setFilter('odb') },
-          { label: 'Teams licenciado, sem uso', value: s.teamsLicensedInactive, cls: 'warn', onclick: () => table.setFilter('teamsidle') },
-          { label: 'Licenciados sem nenhuma atividade', value: s.licensedNoActivity ?? 0, cls: s.licensedNoActivity ? 'danger' : 'ok', onclick: () => table.setFilter('none'), title: 'Com produto atribuído e sem atividade em Exchange, Teams, SharePoint e OneDrive no período — candidatos a revisão de licença.' },
-        ]));
-        if (s.licensedTeams || s.licensedExchange) {
-          const lic = rows.filter((r) => r.products?.length && !r.deleted), act = lic.filter((r) => !r.noActivity).length;
-          box.append(vizRow(
-            vizCard('Atividade dos licenciados', donut([['Com atividade', act, () => table.setFilter('active'), 'ok'], ['Sem nenhuma atividade', lic.length - act, () => table.setFilter('none'), 'danger']], { centerLabel: t('usuários') })),
-            vizCard('Adoção no período', barList([['Exchange', s.activeExchange], ['Teams', s.activeTeams], ['SharePoint', s.activeSharePoint], ['OneDrive', s.activeOneDrive]].map(([k, v]) => [raw(k), v]), s.users))));
-        }
-        if (s.refreshDate) box.append(h('p', { class: 'muted small' }, t('Dados da Microsoft atualizados até {s}.', { s: isoDay(s.refreshDate) })));
-        const table = DataTable({ rows, name: 'uso-m365', onRowClick: (r) => modal(hidden ? t('Usuário (oculto)') : (r.displayName || r.upn), kv([['UPN', raw(hidden ? t('Oculto pela Microsoft') + ' · ' + r.upn : r.upn)], ['Produtos', r.products?.length ? raw(r.products.join(', ')) : '—'], ['Exchange', isoDay(r.exchange)], ['Teams', isoDay(r.teams)], ['SharePoint', isoDay(r.sharePoint)], ['OneDrive', isoDay(r.oneDrive)], ['Mensagens Teams', r.teamsMessages ?? '—'], ['Reuniões Teams', r.teamsMeetings ?? '—'], ['Chamadas Teams', r.teamsCalls ?? '—'], ['Excluído', yesNo(r.deleted)]])), columns: [
-          hidden
-            ? { key: 'upn', label: 'Usuário (oculto)', render: (r) => h('span', { class: 'mono muted', title: r.upn }, raw(shortId(r.upn))) }
-            : { key: 'displayName', label: 'Usuário' },
+        const linked = id => () => table.setFilter(id);
+        if (current) {
+          box.append(kpis([
+            { label: 'Contas com serviço licenciado', value: s.eligible },
+            { label: 'Com atividade', value: s.activeUsers, onclick: linked('active') },
+            { label: 'Sem atividade no período', value: s.licensedNoActivity, cls: 'warn', onclick: linked('inactive') },
+            { label: 'Atividade inconclusiva', value: s.insufficient, onclick: linked('incomplete') },
+          ]));
+          const range = s.startDate && s.refreshDate ? t('De {a} a {b} (UTC)', { a: isoDay(s.startDate), b: isoDay(s.refreshDate) }) : t('Período sem data de referência da Microsoft');
+          box.append(h('div', { class: 'usage-caption' }, h('h3', null, 'Adoção por serviço'), h('span', null, raw(range))),
+            h('p', { class: 'usage-help' }, 'A adoção divide as contas com atividade pelas contas com licença confirmada no próprio serviço. Cada pessoa pode aparecer em mais de uma linha.'));
+          const adoption = DataTable({ rows: s.services, name: 'adocao-por-servico', sheet: 'Adoção por serviço', compact: true, columns: [
+            { key: 'name', label: 'Serviço', render: r => h('strong', null, raw(r.name)) },
+            { key: 'pct', label: 'Adoção (%)', render: r => r.pct == null ? '—' : h('span', { class: 'usage-rate' }, raw(usagePercent.format(r.pct / 100)), h('span', { class: 'usage-track', 'aria-hidden': 'true' }, h('i', { style: 'width:' + Math.min(100, Math.max(0, r.pct)) + '%' }))) },
+            { key: 'licensed', label: 'Com licença confirmada' }, { key: 'active', label: 'Com atividade' },
+            { key: 'inactive', label: 'Sem atividade no período', render: r => r.inactive ? h('button', { type: 'button', class: 'usage-filter', 'aria-label': t('Ver contas sem atividade em {s}', { s: r.name }), onclick: linked('idle-' + r.key) }, raw(num(r.inactive)), h('span', { 'aria-hidden': 'true' }, '›')) : raw('0') },
+            { key: 'unknown', label: 'Atividade inconclusiva', exportOnly: true }, { key: 'unknownLicense', label: 'Licença não informada', exportOnly: true },
+            { key: 'startDate', label: 'Início do período', exportOnly: true, export: () => s.startDate }, { key: 'refreshDate', label: 'Fim do período', exportOnly: true, export: () => s.refreshDate },
+          ] });
+          adoption.classList.add('usage-services');
+          box.append(adoption);
+          const gaps = s.services.filter(r => r.unknown || r.unknownLicense);
+          if (gaps.length || s.unknownAccount) {
+            const coverage = gaps.map(r => t('{s} · {a} com atividade inconclusiva, {b} sem licença informada', { s: r.name, a: num(r.unknown), b: num(r.unknownLicense) }));
+            if (s.unknownAccount) coverage.push(t('Contas sem situação informada: {n}', { n: num(s.unknownAccount) }));
+            box.append(h('details', { class: 'usage-details' }, h('summary', null, 'Cobertura parcial dos dados'), h('ul', null, ...coverage.map(item => h('li', null, raw(item))))));
+          }
+        } else box.append(h('p', { class: 'note' }, 'Gere o relatório novamente para calcular a adoção por licença de serviço.'));
+        box.append(h('div', { class: 'usage-caption' }, h('h3', null, 'Revisão por conta')),
+          h('p', { class: 'usage-help' }, 'Revise as contas sem atividade antes de alterar licenças. O relatório cobre Exchange, Teams, SharePoint e OneDrive. As datas mostram a última atividade conhecida, inclusive antes do período.'));
+        const table = DataTable({ rows, name: 'uso-m365', sheet: 'Revisão por conta', onRowClick: r => modal(hidden ? t('Usuário (oculto)') : (r.displayName || r.upn), kv([
+          ['UPN', raw(r.upn || '—')], ['Situação no período', raw(status(r))], ['Produtos', r.products?.length ? raw(r.products.join(', ')) : '—'],
+          ...Object.entries(services).map(([key, name]) => [name, raw(serviceStatus(r.serviceStatus?.[key]) + ' · ' + (isoDay(r[key]) || '—'))]),
+          ['Mensagens Teams', present(r.teamsMessages)], ['Reuniões Teams', present(r.teamsMeetings)], ['Chamadas Teams', present(r.teamsCalls)], ['Atualização do Teams', isoDay(r.teamsRefreshDate)],
+        ])), columns: [
+          hidden ? { key: 'upn', label: 'Usuário (oculto)', render: r => h('span', { class: 'mono muted', title: r.upn }, raw(r.upn ? r.upn.slice(0, 8) + '…' : '—')) } : { key: 'displayName', label: 'Usuário' },
+          { key: 'usageStatus', label: 'Situação no período', render: r => badge(status(r), r.usageStatus === 'inactive' ? 'warn' : r.usageStatus === 'active' ? 'ok' : ''), export: status },
           ...(hidden ? [] : [{ key: 'upn', label: 'UPN' }]),
-          { key: 'products', label: 'Produtos', render: (r) => r.products?.length ? h('span', { title: r.products.join('\n') }, raw(r.products[0] + (r.products.length > 1 ? ` (+${r.products.length - 1})` : ''))) : '—', export: (r) => r.products },
-          { key: 'exchange', label: 'Exchange', render: (r) => isoDay(r.exchange), export: (r) => r.exchange }, { key: 'teams', label: 'Teams', render: (r) => isoDay(r.teams), export: (r) => r.teams },
-          { key: 'sharePoint', label: 'SharePoint', render: (r) => isoDay(r.sharePoint), export: (r) => r.sharePoint }, { key: 'oneDrive', label: 'OneDrive', render: (r) => isoDay(r.oneDrive), export: (r) => r.oneDrive },
-          { key: 'teamsMessages', label: 'Msgs Teams', render: (r) => r.teamsMessages ?? '—' }, { key: 'teamsMeetings', label: 'Reuniões Teams', render: (r) => r.teamsMeetings ?? '—' },
-          ...(hidden ? [] : [{ key: 'deleted', label: 'Excluído', render: (r) => (r.deleted ? badge('Sim', 'warn') : '—'), exportOnly: false }]),
-          { key: 'teamsCalls', label: 'Chamadas Teams', exportOnly: true },
-          { key: 'hasExchange', label: 'Licença com Exchange', exportOnly: true, export: (r) => !!r.hasExchange }, { key: 'hasTeams', label: 'Licença com Teams', exportOnly: true, export: (r) => !!r.hasTeams },
-          { key: 'noActivity', label: 'Sem nenhuma atividade', exportOnly: true, export: (r) => !!r.noActivity },
+          { key: 'products', label: 'Produtos', render: r => r.products?.length ? h('span', { title: r.products.join('\n') }, raw(r.products[0] + (r.products.length > 1 ? ' (+' + (r.products.length - 1) + ')' : ''))) : '—', export: r => r.products },
+          ...Object.entries(services).map(([key, name]) => ({ key, label: name, render: r => isoDay(r[key]), export: r => r[key] })),
+          ...Object.entries(services).map(([key, name]) => ({ key: key + 'Status', label: t('Situação · {s}', { s: name }), exportOnly: true, export: r => serviceStatus(r.serviceStatus?.[key]) })),
+          { key: 'teamsMessages', label: 'Mensagens Teams', render: r => present(r.teamsMessages) }, { key: 'teamsMeetings', label: 'Reuniões Teams', render: r => present(r.teamsMeetings) }, { key: 'teamsCalls', label: 'Chamadas Teams', render: r => present(r.teamsCalls) },
+          { key: 'teamsRefreshDate', label: 'Atualização do Teams', exportOnly: true }, { key: 'deleted', label: 'Excluído', exportOnly: true },
         ], filters: [
-          { id: 'none', label: 'Licenciados sem atividade', fn: (r) => r.products?.length && r.noActivity && !r.deleted }, { id: 'active', label: 'Licenciados com atividade', fn: (r) => r.products?.length && !r.noActivity && !r.deleted }, { id: 'teamsidle', label: 'Teams licenciado, sem uso', fn: (r) => r.hasTeams && !r.teams && !r.deleted }, { id: 'noexch', label: 'Sem atividade Exchange', fn: (r) => r.hasExchange && !r.exchange && !r.deleted },
-          { id: 'exch', label: 'Ativos Exchange', fn: (r) => r.exchange && !r.deleted }, { id: 'teams', label: 'Ativos Teams', fn: (r) => r.teams && !r.deleted }, { id: 'spo', label: 'Ativos SharePoint', fn: (r) => r.sharePoint && !r.deleted }, { id: 'odb', label: 'Ativos OneDrive', fn: (r) => r.oneDrive && !r.deleted }, { id: 'deleted', label: 'Excluídos', fn: (r) => r.deleted },
+          { id: 'inactive', label: 'Sem atividade no período', fn: r => r.usageStatus === 'inactive' },
+          { id: 'active', label: 'Com atividade', fn: r => r.usageStatus === 'active' },
+          { id: 'incomplete', label: 'Atividade inconclusiva', fn: r => r.usageStatus === 'unknown' && Object.values(r.serviceStatus || {}).some(v => ['active', 'inactive', 'unknown'].includes(v)) },
+          ...Object.entries(services).map(([key, name]) => ({ id: 'idle-' + key, label: t('{s} sem atividade', { s: name }), fn: r => r.deleted === false && r.serviceStatus?.[key] === 'inactive' })),
+          { id: 'deleted', label: 'Excluídos', fn: r => r.deleted === true },
         ] });
         box.append(table);
         return box;
-      }, { subtitle: 'Veja quais serviços do Microsoft 365 e recursos do Teams os usuários utilizaram. As datas indicam a atividade mais recente no período selecionado.', graphSource: '/reports/getOffice365ActiveUserDetail /reports/getTeamsUserActivityUserDetail', controls: form, ring: (p) => {
-        const lic = (p.rows || []).filter((r) => r.products?.length && !r.deleted), act = lic.filter((r) => !r.noActivity).length, pc = pctOf(act, lic.length);
-        return lic.length ? { pct: pc, label: 'dos usuários licenciados com atividade no período', caption: t('{a} de {b} usuários', { a: num(act), b: num(lic.length) }), tone: toneFor(pc, 90, 75) } : null;
-      } }));
+      }, { subtitle: 'Identifique quais serviços licenciados foram utilizados e quais contas merecem uma revisão de adoção.', graphSource: '/reports/getOffice365ActiveUserDetail /reports/getTeamsUserActivityUserDetail', controls: form }));
     }
     draw();
     return wrap;
@@ -4504,13 +4578,18 @@
   function openSessionReport(payload) {
     const type = payload._meta.report;
     const params = payload._meta.params || {};
-    if (type === 'app_devices') {
+    if (type === 'groups' && params.groupId) {
+      modal(payload.rows?.[0]?.name || t('Grupo'), groupCountPanel(params.groupId));
+    } else if (type === 'app_devices') {
       // The server sorts and bounds these IDs; an older tab entry may use the original order.
       App.cache[type + JSON.stringify(params)] = payload;
       modal(t('Dispositivos com o app'), appDevicesPanel(params.ids, params.name));
     } else if (type === 'devicescore' && params.section === 'devices') {
       App.cache[type + JSON.stringify(params)] = payload;
       modal(t('Pontuações por dispositivo'), deviceScoreInventory());
+    } else if (type === 'devicescore' && params.section === 'baseline') {
+      App.cache[type + JSON.stringify(params)] = payload;
+      openScoreBaseline(params.id, payload.rows?.[0]?.name);
     } else if (type === 'device_compliance') {
       App.cache[type + JSON.stringify(params)] = payload;
       modal(params.name || params.id, compliancePanel(params));
@@ -4519,6 +4598,7 @@
       modal(params.name || params.id, managedAppPanel(type, params));
     } else {
       if (type === 'usage') App.params.usagePeriod = params.period;
+      if (type === 'groups') App.params.groupCounts = params.counts === 'all';
       if (type === 'devices') App.params.devStale = params.stale_days;
       App.go(type);
     }
@@ -4556,7 +4636,7 @@
       h('section', { class: 'activity-section' }, h('h3', null, 'Consultas para acompanhar', remoteCount),
         h('p', { class: 'muted small' }, t('Consultas em andamento, interrompidas ou à espera de retirada ficam disponíveis por até {n} minutos após a última atualização.', { n: App.me.privacy?.jobTtlMinutes || 15 })),
         actionNotice, notice, emptyRemote, remote));
-    const status = { pending: 'Aguardando', running: 'Em processamento', done: 'Pronto para abrir', error: 'Falhou' };
+    const status = { pending: 'Aguardando', running: 'Em processamento', paused: 'Pausado', done: 'Pronto para abrir', error: 'Falhou' };
     let busy = false, needsRefresh = false, refreshTimer;
     const button = (label, click) => h('button', { class: 'btn sm', type: 'button', onclick: click }, label);
     const row = (title, detail, ...controls) => h('li', null,
@@ -4569,7 +4649,8 @@
       local.replaceChildren(...results.map((p) => {
         const m = p._meta, params = m.params || {};
         const suffix = m.report === 'usage' ? params.period : m.report === 'app_devices' || m.report === 'device_compliance' || APP_REPORT_TITLES[m.report] ? params.name : '';
-        const title = m.report === 'devicescore' && params.section === 'devices' ? t('Pontuações por dispositivo') : reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
+        const scoreDetail = m.report === 'devicescore' && { devices: 'Pontuações por dispositivo', baseline: 'Detalhes da referência' }[params.section];
+        const title = scoreDetail ? t(scoreDetail) : reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
         return row(title, h('small', null, raw(fmtDate(m.generated_at))), button('Abrir relatório', () => openSessionReport(p)));
       }));
       localCount.textContent = num(results.length);
@@ -4630,8 +4711,11 @@
         } else {
           waitController = new AbortController();
           stop.hidden = false;
-          const payload = await withDeadline(REPORT_WAIT_MS, waitController.signal, (signal) =>
-            followReadJob(job, (j) => { notice.textContent = t(j.message || status[j.status]); }, { signal, timeout: REPORT_REQUEST_MS }),
+          const payload = await withDeadline(REPORT_WAIT_MS, waitController.signal, async (signal) => {
+            const opts = { signal, timeout: REPORT_REQUEST_MS };
+            const current = job.status === 'paused' ? await api('jobs/' + job.job_id + '/run', { ...opts, method: 'POST', reportOnly: true, body: { resume: true } }) : job;
+            return followReadJob(current, (j) => { notice.textContent = t(j.message || status[j.status]); }, opts);
+          },
             new Error(t('O relatório excedeu o tempo de espera. Gere novamente para tentar.')));
           if (payload?._meta?.report !== job.type) throw new Error(t('O servidor devolveu um resultado inválido para o relatório.'));
           const params = payload._meta.params;

@@ -33,10 +33,12 @@ The Users report places account status and directory origin side by side, with a
 | Identity and security | Review users, guests, inactive accounts, MFA, privileged roles, Conditional Access and Secure Score. |
 | Applications and credentials | Inspect OAuth consents and plan secret and certificate renewals. See upcoming expirations in three windows and identify objects with no credential of the same type active beyond 90 days. |
 | Microsoft 365 and devices | Review licenses, groups, service usage, mailbox quotas, OneDrive, SharePoint and Intune inventory. |
+| Groups | Search the inventory immediately after directory enumeration. Open one group for member and owner counts, or request counts for every group to filter and export them together. |
+| Microsoft 365 adoption | Compare activity by service within the chosen period and open the underlying users. Each service shows its own licensed population. [Calculation and example](docs/usage-and-adoption.md) |
 | My reports | Choose a report, reopen a result in this tab, or resume an interrupted request. An empty queue means there is nothing waiting for your attention. Export a result to keep it after you close or reload the tab. |
 | Devices and compliance | Filter by OS release and build. Open a noncompliant device to inspect the policy and settings reported by Intune. |
 | Intune app deployments | Inspect required, available and uninstall assignments, included and excluded groups, failure counts and affected devices. Discovered software has its own inventory. |
-| Identity Score | Compare the last measured score in each month across 3, 6, 12 or 24 consecutive months. See earned points, available points and the percentage for each observation. |
+| Identity Score | Compare the latest measured score for each of the last four calendar months. See earned points, available points and the percentage for each observation. |
 | Portal audit | Combine date, actor and action filters across the retention period. Load older events to include them in search and exports. |
 | Identity Protection | Review risky users and recent detections independently. If Microsoft denies one source, the portal explains its access requirements and shows the other source when available. |
 | Delegated operations | Run supported Intune device actions and Exchange mailbox archive operations with the signed-in account's permissions. |
@@ -50,7 +52,7 @@ The Users report places account status and directory origin side by side, with a
 
 *Groups report in English. The Brazilian Portuguese screenshot below uses the same 40 fictional groups.*
 
-Identity Score opens on 24 months and groups consecutive missing months on the chart. **Coverage by source** shows the first and last valid measurements and how many closings each source supplied. In **Security → Identity Score → Portal history**, a tenant administrator can opt in to retain the latest measured score for each of 24 UTC calendar months. Generating the report collects available Graph observations. Months without a measurement remain empty. The Excel export identifies each source. Select **Add earlier history files** to combine existing archives. Operators using an authorized multi-tenant app can offer daily WP-Cron collection with a separate tenant opt-in. [History, access, erasure and unattended collection](docs/identity-score-history.md#english)
+Identity Score covers the current UTC month and the three preceding months. Each card shows the measured percentage and earned/available points. Open **Coverage by source** to inspect the dates returned by Graph, import a tenant archive or manage collection. The Excel report uses the same four months. [History and collection](docs/identity-score-history.md#english)
 
 ![Monthly Identity Score, measurement coverage and exact points in a fictional Microsoft Entra tenant.](docs/assets/identity-score-en.webp)
 
@@ -100,9 +102,11 @@ Em **Usuários**, compare a situação e a origem das contas. No ranking abaixo,
 | Aplicativos e credenciais | Revisar consentimentos OAuth e planejar a renovação de segredos e certificados. Identifique vencimentos em três faixas e objetos sem outra credencial do mesmo tipo ativa além de 90 dias. |
 | Microsoft 365 e dispositivos | Analisar licenças, grupos, uso dos serviços, cotas de caixas de correio, OneDrive, SharePoint e inventário do Intune. |
 | Meus relatórios | Escolher um relatório, reabrir um resultado nesta aba ou retomar uma consulta interrompida. A fila vazia indica que não há consultas pendentes. Exporte o resultado para mantê-lo depois de recarregar ou fechar a aba. |
+| Grupos | Pesquisar o inventário assim que o diretório carregar. Consultar membros e proprietários de um grupo ou solicitar todas as contagens para filtrar e exportar o conjunto. |
+| Adoção do Microsoft 365 | Comparar a atividade por serviço no período escolhido e abrir a lista de usuários correspondente. Cada serviço identifica sua população licenciada. [Cálculo e exemplo](docs/usage-and-adoption.md) |
 | Dispositivos e conformidade | Filtrar por versão e build do sistema. Abra um dispositivo não conforme para consultar a política e as configurações reportadas pelo Intune. |
 | Implantação de aplicativos do Intune | Consultar instalações obrigatórias, opcionais e desinstalações, grupos incluídos e excluídos, totais de falhas e dispositivos afetados. O software descoberto tem um inventário próprio. |
-| Identity Score | Comparar a última medição de cada mês em períodos de 3, 6, 12 ou 24 meses consecutivos. Consultar os pontos obtidos, o máximo e o percentual de cada medição. |
+| Identity Score | Comparar a última pontuação medida em cada um dos últimos quatro meses. Consultar os pontos obtidos, o máximo e o percentual de cada medição. |
 | Auditoria do portal | Combinar filtros de data, ator e ação durante o período de retenção. Carregue eventos anteriores para incluí-los na pesquisa e na exportação. |
 | Identity Protection | Consultar usuários em risco e detecções recentes de forma independente. Se a Microsoft recusar uma das fontes, o portal explica os requisitos e mostra os dados disponíveis da outra. |
 | Operações delegadas | Executar ações suportadas em dispositivos do Intune e gerenciar o arquivamento de caixas no Exchange com as permissões da conta conectada. |
@@ -116,7 +120,7 @@ Em **Usuários**, compare a situação e a origem das contas. No ranking abaixo,
 
 *Relatório de Grupos em português brasileiro. São os mesmos 40 grupos fictícios da captura em inglês.*
 
-O Identity Score abre em 24 meses e agrupa os meses consecutivos sem dados no gráfico. **Cobertura por origem** identifica a primeira e a última medição válida e quantos fechamentos cada fonte forneceu. Em **Segurança → Identity Score → Histórico do portal**, um administrador do tenant pode autorizar a retenção da última medição de cada mês em uma janela de 24 meses UTC. O portal consulta o Graph ao gerar o relatório. Os meses sem medição ficam em branco e o Excel identifica a origem de cada fechamento. Selecione **Complementar com arquivos anteriores** para reunir históricos existentes. Empresas que usam o aplicativo multitenant autorizado podem habilitar a coleta diária pelo WP-Cron por meio de uma autorização separada. [Histórico, acesso, exclusão e coleta agendada](docs/identity-score-history.md#português)
+O Identity Score mostra o mês atual em UTC e os três anteriores. Cada cartão apresenta o percentual medido e os pontos obtidos e possíveis. Abra **Cobertura por origem** para conferir as datas retornadas pelo Graph, importar um arquivo da empresa ou gerenciar a coleta. O Excel traz os mesmos quatro meses. [Histórico e coleta](docs/identity-score-history.md#português)
 
 ![Evolução mensal do Identity Score, cobertura das medições e pontos exatos em um tenant fictício do Microsoft Entra.](docs/assets/identity-score-pt-br.webp)
 

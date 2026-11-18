@@ -8,8 +8,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Compact JSON codec used for encrypted job blobs.
  *
- * Since 2.1 there is NO report cache on the server: results are kept only in the user's browser
- * tab. The former database methods remain as no-ops for backward compatibility.
+ * Jobs retain encrypted checkpoints until the result is collected. Earlier cache methods
+ * remain available to integrations using the old interface.
  */
 final class Report_Cache {
 
@@ -27,7 +27,12 @@ final class Report_Cache {
 	}
 
 	public static function encode( array $data ): string {
-		return (string) gzcompress( (string) wp_json_encode( $data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE ), 6 );
+		$json = wp_json_encode( $data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE );
+		$compressed = is_string( $json ) ? gzcompress( $json, 3 ) : false;
+		if ( false === $compressed ) {
+			throw new \RuntimeException( 'Não foi possível preparar os dados temporários deste relatório.' );
+		}
+		return $compressed;
 	}
 
 	public static function decode( string $blob ): ?array {

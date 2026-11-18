@@ -115,14 +115,14 @@ final class Jobs {
 			// the session and normalized query so another user or report cannot claim it.
 			$hash   = hash_hmac( 'sha256', wp_json_encode( [ strtolower( $request_id ), $type, $params ] ), $session['data_key'] );
 			$job_id = sprintf( '%s-%s-8%s-8%s-%s', substr( $hash, 0, 8 ), substr( $hash, 8, 4 ), substr( $hash, 12, 3 ), substr( $hash, 15, 3 ), substr( $hash, 18, 12 ) );
-			$row    = self::get( $job_id, $session );
+			$row    = self::get( $job_id, $session, false );
 			if ( $row ) {
 				return [ 'job' => self::public_view( $row, $session ) ];
 			}
 		} else {
 			$job_id = wp_generate_uuid4();
 		}
-		$active = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE user_oid = %s AND status IN ('pending','running')", $session['owner'] ) );
+		$active = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE user_oid = %s AND status IN ('pending','running','paused')", $session['owner'] ) );
 		if ( $active >= self::MAX_ACTIVE ) {
 			// The oldest job may be processing a request or waiting for Graph's Retry-After.
 			// Keep its progress and let the new report retry when there is capacity.
@@ -158,7 +158,7 @@ final class Jobs {
 		}
 		if ( false === $created ) {
 			// A simultaneous retry can win the primary-key insert between SELECT and INSERT.
-			$row = $deduplicate ? self::get( $job_id, $session ) : null;
+			$row = $deduplicate ? self::get( $job_id, $session, false ) : null;
 			if ( $row ) {
 				return [ 'job' => self::public_view( $row, $session ) ];
 			}
@@ -169,11 +169,13 @@ final class Jobs {
 	}
 
 	/** A job is only visible to the session that created it. */
-	public static function get( string $job_id, array $session ): ?array {
+	public static function get( string $job_id, array $session, bool $with_state = true ): ?array {
 		global $wpdb;
 		$table = Installer::table( 'jobs' );
+		// A status response only needs the encrypted payload for its small terminal error details.
+		$fields = $with_state ? '*' : "job_id, job_type, status, progress, total, message, updated_at, CASE WHEN status = 'error' THEN state END AS state";
 		$row   = $wpdb->get_row(
-			$wpdb->prepare( "SELECT * FROM {$table} WHERE job_id = %s AND tenant_id = %s AND user_oid = %s", $job_id, strtolower( $session['tenant_id'] ), $session['owner'] ),
+			$wpdb->prepare( "SELECT {$fields} FROM {$table} WHERE job_id = %s AND tenant_id = %s AND user_oid = %s", $job_id, strtolower( $session['tenant_id'] ), $session['owner'] ),
 			ARRAY_A
 		);
 		return $row ?: null;
@@ -210,7 +212,7 @@ final class Jobs {
 		$rows = $wpdb->get_results( $wpdb->prepare(
 			"SELECT job_id, job_type, status, progress, total, message, updated_at, CASE WHEN status = 'error' THEN state END AS state FROM {$table}
 			 WHERE tenant_id = %s AND user_oid = %s AND updated_at >= %s AND job_type IN ({$placeholders})
-			 ORDER BY CASE WHEN status IN ('pending','running') THEN 0 ELSE 1 END, updated_at DESC, job_id DESC LIMIT 50",
+			 ORDER BY CASE WHEN status IN ('pending','running','paused') THEN 0 ELSE 1 END, updated_at DESC, job_id DESC LIMIT 50",
 			array_merge( [ strtolower( $session['tenant_id'] ), $session['owner'], $cutoff ], $types )
 		), ARRAY_A );
 		if ( $wpdb->last_error ) {
@@ -240,7 +242,7 @@ final class Jobs {
 	/**
 	 * Executes one time-boxed step.
 	 */
-	public static function run( string $job_id, array $session, bool $reports_only = false ): array {
+	public static function run( string $job_id, array $session, bool $reports_only = false, bool $resume = false ): array {
 		global $wpdb;
 		$table = Installer::table( 'jobs' );
 		// The activity UI can resume reads only. Check this inside the lease claim,
@@ -256,9 +258,10 @@ final class Jobs {
 		}
 		// Load the state after acquiring the lease. Loading it before the UPDATE could replay
 		// old progress if another request completed a step between the SELECT and the claim.
+		$claimable = $reports_only && $resume ? "status IN ('pending','paused')" : "status = 'pending'";
 		$claimed = $wpdb->query(
 			$wpdb->prepare(
-				"UPDATE {$table} SET status = 'running', updated_at = %s WHERE job_id = %s AND tenant_id = %s AND user_oid = %s AND (status = 'pending' OR (status = 'running' AND job_type NOT IN ('act_sync','act_archive') AND updated_at < %s)){$read_guard}",
+				"UPDATE {$table} SET status = 'running', updated_at = %s WHERE job_id = %s AND tenant_id = %s AND user_oid = %s AND ({$claimable} OR (status = 'running' AND job_type NOT IN ('act_sync','act_archive') AND updated_at < %s)){$read_guard}",
 				array_merge( [
 					gmdate( 'Y-m-d H:i:s' ), $job_id, strtolower( $session['tenant_id'] ), $session['owner'],
 					gmdate( 'Y-m-d H:i:s', time() - self::LOCK_SECONDS ),
@@ -268,7 +271,7 @@ final class Jobs {
 		if ( false === $claimed ) {
 			throw new \RuntimeException( 'Não foi possível processar o relatório. Verifique o banco de dados do WordPress.' );
 		}
-		$row = self::get( $job_id, $session );
+		$row = self::get( $job_id, $session, (bool) $claimed );
 		if ( ! $row ) {
 			throw new \InvalidArgumentException( 'Relatório não encontrado (expirado ou de outra sessão). Gere novamente.' );
 		}
@@ -303,11 +306,14 @@ final class Jobs {
 		$report->set_session( $session );
 		$params = (array) ( $box['params'] ?? [] );
 		$state  = (array) ( $box['state'] ?? $report->initial_state( $params ) );
+		unset( $box, $row['state'] );
 
 		// Graph asked to wait (Retry-After): don't call it again before that, whatever the poll rate.
 		$wait = (int) ( $state['_retry_at'] ?? 0 ) - time();
 		if ( $wait > 0 ) {
-			$wpdb->update( $table, [ 'status' => 'pending', 'updated_at' => gmdate( 'Y-m-d H:i:s' ) ], [ 'job_id' => $job_id ] );
+			if ( false === $wpdb->update( $table, [ 'status' => 'pending', 'updated_at' => gmdate( 'Y-m-d H:i:s' ) ], [ 'job_id' => $job_id ] ) ) {
+				throw new \RuntimeException( 'Não foi possível salvar o progresso no banco de dados do WordPress.' );
+			}
 			$row['status'] = 'pending';
 			return self::public_view( $row ) + [ 'retryAfter' => $wait, 'waitReason' => $state['_retry_reason'] ?? 'throttled', 'pagesRead' => (int) ( $state['_pages_read'] ?? 0 ) ];
 		}
@@ -317,6 +323,7 @@ final class Jobs {
 		$previous_phase = $state['phase'] ?? null;
 		$previous_pages = (int) ( $state['_pages_read'] ?? 0 );
 		$advanced = false;
+		$paused   = false;
 
 		$deadline = microtime( true ) + self::STEP_BUDGET;
 		$report->set_deadline( $deadline );
@@ -333,13 +340,15 @@ final class Jobs {
 				$result = [ 'state' => $state, 'done' => false, 'progress' => $row['progress'], 'total' => $row['total'], 'message' => $e->getMessage() ];
 			}
 			$state  = $result['state'];
+			unset( $result['state'] );
 			$advanced = $previous_phase !== ( $state['phase'] ?? null ) || (int) ( $state['_pages_read'] ?? 0 ) > $previous_pages || (int) ( $result['progress'] ?? 0 ) > (int) $row['progress'];
 			$retry  = max( 0, (int) ( $state['_retry_at'] ?? 0 ) - time() );
 			$reason = $state['_retry_reason'] ?? 'throttled';
 			if ( $retry > 0 && ! $is_action ) {
 				$attempts   = $advanced ? 1 : 1 + (int) ( $state['_read_retries'] ?? 0 );
 				$limit      = 'throttled' === $reason ? self::MAX_REPORT_RETRIES : 3;
-				if ( $retry >= self::TTL || $attempts > $limit ) {
+				$has_progress = (int) ( $state['_pages_read'] ?? 0 ) > 0 || (int) ( $result['progress'] ?? 0 ) > 0;
+				if ( $retry >= self::TTL || ( $attempts > $limit && ! $has_progress ) ) {
 					throw new Graph_Exception(
 						'budget' === $reason
 							? 'A consulta não avançou dentro do tempo de processamento disponível nesta hospedagem.'
@@ -348,7 +357,10 @@ final class Jobs {
 					);
 				}
 				$retry = max( $retry, 'budget' === $reason ? 1 : min( 30, 2 ** min( 5, $attempts ) ) );
-				$state['_read_retries'] = $attempts;
+				// A read that already has pages can be resumed manually from its last cursor.
+				// An automatic poll cannot claim a paused job. Retry-After still applies on resume.
+				$paused = $attempts > $limit;
+				$state['_read_retries'] = $paused ? 0 : $attempts;
 				$state['_retry_at']     = time() + $retry;
 			} else {
 				unset( $state['_read_retries'] );
@@ -377,7 +389,7 @@ final class Jobs {
 						'stored'       => false,
 					]
 				);
-				$wpdb->update(
+				$saved = $wpdb->update(
 					$table,
 					[
 						'status'     => 'done',
@@ -389,23 +401,30 @@ final class Jobs {
 					],
 					[ 'job_id' => $job_id ]
 				);
-				Audit::log( 'report_done', $session['tenant_id'], $session['upn'], [ 'report' => $row['job_type'], 'rows' => $payload['_meta']['rows'] ?? null ] );
 			} else {
-				$wpdb->update(
+				$saved = $wpdb->update(
 					$table,
 					[
-						'status'     => 'pending',
+						'status'     => $paused ? 'paused' : 'pending',
 						'progress'   => (int) ( $result['progress'] ?? 0 ),
 						'total'      => (int) ( $result['total'] ?? 0 ),
 						// Pages kept, Graph asked to wait: say so instead of a progress line that looks stuck.
-						'message'    => $retry > 0 && 'budget' !== $reason
+						'message'    => $paused ? 'Coleta pausada. Retome em Meus relatórios a partir do último ponto salvo.' : ( $retry > 0 && 'budget' !== $reason
 							? ( 'network' === $reason ? 'A conexão falhou. Tentando novamente…' : 'O Microsoft Graph pediu uma pausa. Continuando…' )
-							: mb_substr( Privacy::mask_emails( (string) ( $result['message'] ?? '' ) ), 0, 500 ),
+							: mb_substr( Privacy::mask_emails( (string) ( $result['message'] ?? '' ) ), 0, 500 ) ),
 						'state'      => self::seal( [ 'params' => $params, 'state' => $state ], $session['data_key'] ),
 						'updated_at' => gmdate( 'Y-m-d H:i:s' ),
 					],
 					[ 'job_id' => $job_id ]
 				);
+			}
+			if ( false === $saved ) {
+				throw new \RuntimeException( $is_action
+					? 'Não foi possível salvar o estado da ação. Confira o resultado no Microsoft 365 antes de executá-la novamente.'
+					: 'Não foi possível salvar o progresso no banco de dados do WordPress.' );
+			}
+			if ( $saved && ! empty( $result['done'] ) ) {
+				Audit::log( 'report_done', $session['tenant_id'], $session['upn'], [ 'report' => $row['job_type'], 'rows' => $payload['_meta']['rows'] ?? null ] );
 			}
 		} catch ( Graph_Exception $e ) {
 			if ( 'j365_token' !== $e->graph_code() ) {
@@ -420,7 +439,7 @@ final class Jobs {
 			self::fail( $job_id, $row, $session, $e );
 		}
 
-		$row = self::get( $job_id, $session );
+		$row = self::get( $job_id, $session, false );
 		if ( ! $row ) {
 			return [ 'job_id' => $job_id, 'status' => 'error', 'progress' => 0, 'total' => 0, 'message' => 'Job expirado.' ];
 		}

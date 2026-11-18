@@ -11,7 +11,7 @@ Use this optional collector when the company needs a measurement even in months 
 python scripts/collect_identity_score.py --tenant TENANT_GUID --output /private/reports/identity-score.json
 ```
 
-3. Open **Identity Score** for the same tenant. Expand the local history section and import the JSON. The portal merges those observations in the current tab. The collector keeps the latest genuine UTC measurement in each of the last 24 calendar months. Data gaps remain visible. Existing daily exports can be used as the initial input. Use a separate output file for each tenant.
+3. Open **Identity Score** for the same tenant. Under **Coverage by source**, expand the local history section and import the JSON. The portal merges those observations in the current tab. The collector keeps the latest genuine UTC measurement in each of the last 24 calendar months. Data gaps remain visible. Existing daily exports can be used as the initial input. Use a separate output file for each tenant.
 
 The collector checks the tenant returned by Azure CLI, follows Graph pagination and replaces the archive only after a successful read. It runs against the Microsoft public cloud. A scheduled collection requires the company host to be online and able to reach Azure and Graph.
 
@@ -26,6 +26,6 @@ Use o coletor opcional para acompanhar o score inclusive nos meses em que ningu�
 python scripts/collect_identity_score.py --tenant GUID_DO_TENANT --output "C:\RelatoriosPrivados\identity-score.json"
 ```
 
-3. Em **Identity Score**, no mesmo tenant, expanda **Histórico em arquivo local** e importe o JSON. O portal combina as medições na aba atual. Para cada um dos últimos 24 meses, o arquivo mantém os pontos e a data da última medição real em UTC. Meses sem medição ficam em branco. Um JSON diário já exportado pelo portal pode servir de ponto de partida. Use um arquivo por empresa.
+3. Em **Identity Score**, no mesmo tenant, em **Cobertura por origem**, expanda **Histórico em arquivo local** e importe o JSON. O portal combina as medições na aba atual. Para cada um dos últimos 24 meses, o arquivo mantém os pontos e a data da última medição real em UTC. Meses sem medição ficam em branco. Um JSON diário já exportado pelo portal pode servir de ponto de partida. Use um arquivo por empresa.
 
 O coletor verifica o tenant da sessão, percorre as páginas do Graph e atualiza o arquivo após uma leitura bem-sucedida. A hospedagem compartilhada continua executando somente o plugin. A máquina agendada precisa estar ligada e ter acesso à nuvem pública da Microsoft.
