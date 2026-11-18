@@ -67,7 +67,7 @@ abstract class Report_Base {
 	 * Fetch pages of $url into $state[$bucket], resuming from $state["{$bucket}_next"].
 	 * Returns true when the collection is exhausted.
 	 */
-	protected function fetch_collection( array &$state, string $bucket, string $url, float $deadline, array $headers = [], ?callable $map = null ): bool {
+	protected function fetch_collection( array &$state, string $bucket, string $url, float $deadline, array $headers = [], ?callable $map = null, ?callable $collect = null ): bool {
 		$next_key = $bucket . '_next';
 		$done_key = $bucket . '_done';
 		if ( ! empty( $state[ $done_key ] ) ) {
@@ -87,7 +87,12 @@ abstract class Report_Base {
 				break;
 			}
 			foreach ( $data['value'] as $item ) {
-				$state[ $bucket ][] = $map ? $map( $item ) : $item;
+				$row = $map ? $map( $item ) : $item;
+				if ( $collect ) {
+					$collect( $state, $row );
+				} else {
+					$state[ $bucket ][] = $row;
+				}
 			}
 			$cursor = $data['@odata.nextLink'] ?? null;
 			if ( $next === $cursor ) {

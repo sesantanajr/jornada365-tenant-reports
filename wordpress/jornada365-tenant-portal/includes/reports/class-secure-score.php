@@ -25,7 +25,7 @@ final class Secure_Score extends Report_Base {
 			}
 			$list = $scores['value'] ?? [];
 			$state['latest'] = $list[0] ?? [];
-			$state['trend']  = array_map( static fn( $s ) => [ 'date' => (string) ( $s['createdDateTime'] ?? '' ), 'current' => (float) ( $s['currentScore'] ?? 0 ), 'max' => (float) ( $s['maxScore'] ?? 0 ) ], $list );
+			$state['trend']  = array_map( static fn( $s ) => [ 'date' => (string) ( $s['createdDateTime'] ?? '' ), 'current' => $s['currentScore'] ?? null, 'max' => $s['maxScore'] ?? null ], $list );
 			$state['phase']  = 1;
 		}
 		try {
@@ -49,7 +49,7 @@ final class Secure_Score extends Report_Base {
 		} catch ( Graph_Exception $e ) {
 			$this->optional_error( $state, 'Perfis de controle indisponíveis', $e );
 		}
-		$state['profiles'] = array_column( $state['profile_rows'], null, 'id' );
+		$state['profiles'] = array_column( $state['profile_rows'] ?? [], null, 'id' );
 		unset( $state['profile_rows'], $state['profile_rows_next'], $state['profile_rows_done'] );
 		return [ 'state' => $state, 'progress' => 1, 'total' => 1, 'done' => true, 'message' => 'Concluído' ];
 	}
@@ -84,8 +84,8 @@ final class Secure_Score extends Report_Base {
 	public function finalize( array $state, array $params ): array {
 		$latest   = $state['latest'] ?? [];
 		$profiles = $state['profiles'] ?? [];
-		$current  = (float) ( $latest['currentScore'] ?? 0 );
-		$max      = (float) ( $latest['maxScore'] ?? 0 );
+		$current  = is_numeric( $latest['currentScore'] ?? null ) ? (float) $latest['currentScore'] : null;
+		$max      = is_numeric( $latest['maxScore'] ?? null ) ? (float) $latest['maxScore'] : null;
 
 		$controls = [];
 		$byCat    = [];
@@ -119,10 +119,10 @@ final class Secure_Score extends Report_Base {
 			'summary' => [
 				'current'    => $current,
 				'max'        => $max,
-				'percent'    => $max > 0 ? round( 100 * $current / $max, 1 ) : null,
+				'percent'    => null !== $current && $max > 0 ? round( 100 * $current / $max, 1 ) : null,
 				'date'       => (string) ( $latest['createdDateTime'] ?? '' ),
-				'activeUsers' => (int) ( $latest['activeUserCount'] ?? 0 ),
-				'licensedUsers' => (int) ( $latest['licensedUserCount'] ?? 0 ),
+				'activeUsers' => isset( $latest['activeUserCount'] ) ? (int) $latest['activeUserCount'] : null,
+				'licensedUsers' => isset( $latest['licensedUserCount'] ) ? (int) $latest['licensedUserCount'] : null,
 				'controls'   => count( $controls ),
 				'byCategory' => $byCat,
 			],

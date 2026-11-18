@@ -353,7 +353,7 @@ final class Admin_Ui {
 			<h2>Relatórios</h2>
 			<p class="description" style="max-width:900px">No modelo por tenant, o WordPress consulta o Microsoft Graph usando o token delegado enviado pelo navegador. Para testar os relatórios, entre no portal com uma conta autorizada de um tenant conectado.</p>
 			<?php else : ?>
-			<?php $j365_types = array_values( array_diff( Settings::active_reports(), [ 'app_devices' ] ) ); ?>
+			<?php $j365_types = array_values( array_diff( Settings::active_reports(), [ 'app_devices', 'app_assignments', 'app_failures', 'device_compliance' ] ) ); ?>
 			<h2>Testar todos os relatórios</h2>
 			<p class="description" style="max-width:900px">Consulta o Microsoft Graph no tenant em que o aplicativo foi registrado. O diagnóstico exibe o status, a contagem de linhas, o tempo e os avisos de cada relatório.</p>
 			<p><button type="button" class="button button-primary" id="j365-diag-run" <?php disabled( ! Settings::is_configured() ); ?>>Testar todos os relatórios</button> <span id="j365-diag-status" class="description"></span></p>

@@ -86,20 +86,32 @@ final class Devices extends Report_Base {
 			$state['phase'] = 2;
 		}
 
-		$n = count( $state['entra'] );
+		$n = count( $state['entra'] ) + count( $state['intune_devices'] ?? [] );
 		return [ 'state' => $state, 'progress' => $n, 'total' => $n, 'done' => true, 'message' => 'Concluído' ];
 	}
 
 	public function finalize( array $state, array $params ): array {
 		$stale_days = (int) $params['stale_days'];
 		$intune     = [];
+		$intune_available = ! empty( $state['intune'] );
+		$enrollments = [];
 		$unjoined   = []; // enrolled in Intune without an Entra device id (userless Android/AOSP, failed registration…)
 		foreach ( $state['intune_devices'] ?? [] as $d ) {
+			$id = strtolower( (string) ( $d['id'] ?? '' ) );
+			if ( '' === $id || isset( $enrollments[ $id ] ) ) {
+				continue;
+			}
+			$enrollments[ $id ] = true;
 			$key = strtolower( (string) ( $d['azureADDeviceId'] ?? '' ) );
 			if ( '' !== $key && '00000000-0000-0000-0000-000000000000' !== $key ) {
-				$intune[ $key ] = $d;
+				$old = $intune[ $key ] ?? null;
+				// Re-enrolling a device can leave older Intune records for the same Entra ID.
+				// Use the latest sync, then enrollment and ID, independently of Graph page order.
+				if ( null === $old || self::enrollment_order( $d ) > self::enrollment_order( $old ) ) {
+					$intune[ $key ] = $d;
+				}
 			} else {
-				$unjoined[ 'intune:' . strtolower( (string) ( $d['id'] ?? '' ) ) ] = $d;
+				$unjoined[ 'intune:' . $id ] = $d;
 			}
 		}
 
@@ -126,7 +138,13 @@ final class Devices extends Report_Base {
 		];
 		$seen_intune = [];
 
+		$seen_entra = [];
 		foreach ( $state['entra'] ?? [] as $d ) {
+			$object_id = strtolower( (string) ( $d['id'] ?? '' ) );
+			if ( '' === $object_id || isset( $seen_entra[ $object_id ] ) ) {
+				continue;
+			}
+			$seen_entra[ $object_id ] = true;
 			$trust = (string) ( $d['trustType'] ?? '' );
 			$class = match ( $trust ) {
 				'ServerAd'  => 'Híbrido (Hybrid Entra joined)',
@@ -136,7 +154,7 @@ final class Devices extends Report_Base {
 			};
 			$last_entra = (string) ( $d['approximateLastSignInDateTime'] ?? '' );
 			$key        = strtolower( (string) ( $d['deviceId'] ?? '' ) );
-			$m          = $intune[ $key ] ?? null;
+			$m          = isset( $seen_intune[ $key ] ) ? null : ( $intune[ $key ] ?? null );
 			if ( $m ) {
 				$seen_intune[ $key ] = true;
 			}
@@ -144,17 +162,17 @@ final class Devices extends Report_Base {
 			$days_entra  = self::days_since( $last_entra );
 			$days_sync   = self::days_since( $last_sync );
 			$stale       = ( null === $days_entra || $days_entra > $stale_days ) && ( null === $days_sync || $days_sync > $stale_days );
-			$os          = (string) ( $d['operatingSystem'] ?? ( $m['operatingSystem'] ?? '' ) );
+			if ( $stale && ! $intune_available ) {
+				$stale = null; // A recent Intune sync cannot be ruled out without access to Intune.
+			}
 
 			$row = [
 				'id'               => (string) $d['id'],
 				'deviceId'         => (string) ( $d['deviceId'] ?? '' ),
-				'name'             => (string) ( $d['displayName'] ?? ( $m['deviceName'] ?? '' ) ),
-				'os'               => $os,
-				'osVersion'        => (string) ( $d['operatingSystemVersion'] ?? ( $m['osVersion'] ?? '' ) ),
+				'name'             => (string) ( ( $d['displayName'] ?? '' ) ?: ( $m['deviceName'] ?? '' ) ),
 				'trustType'        => $trust,
 				'classification'   => $class,
-				'enabled'          => (bool) ( $d['accountEnabled'] ?? true ),
+				'enabled'          => $d['accountEnabled'] ?? null,
 				'lastSignInEntra'  => $last_entra,
 				'daysSinceEntra'   => $days_entra,
 				'registered'       => (string) ( $d['registrationDateTime'] ?? '' ),
@@ -167,7 +185,7 @@ final class Devices extends Report_Base {
 				'manufacturer'     => (string) ( $d['manufacturer'] ?? ( $m['manufacturer'] ?? '' ) ),
 				'model'            => (string) ( $d['model'] ?? ( $m['model'] ?? '' ) ),
 				'autopilotProfile' => (string) ( $d['enrollmentProfileName'] ?? '' ),
-				'inIntune'         => (bool) $m,
+				'inIntune'         => $intune_available ? (bool) $m : null,
 				'intuneId'         => $m ? (string) $m['id'] : '',
 				'compliance'       => $m ? (string) ( $m['complianceState'] ?? '' ) : '',
 				'lastSyncIntune'   => $last_sync,
@@ -178,15 +196,15 @@ final class Devices extends Report_Base {
 				'enrollmentType'   => $m ? (string) ( $m['deviceEnrollmentType'] ?? '' ) : '',
 				'primaryUser'      => $m ? (string) ( $m['userPrincipalName'] ?? '' ) : '',
 				'serial'           => $m ? (string) ( $m['serialNumber'] ?? '' ) : '',
-				'encrypted'        => $m ? (bool) ( $m['isEncrypted'] ?? false ) : null,
+				'encrypted'        => $m['isEncrypted'] ?? null,
 				'autopilot'        => ! empty( $d['_autopilot'] ) || '' !== (string) ( $d['enrollmentProfileName'] ?? '' ),
 				'category'         => $m ? (string) ( $m['deviceCategoryDisplayName'] ?? '' ) : '',
-				'supervised'       => $m ? (bool) ( $m['isSupervised'] ?? false ) : null,
+				'supervised'       => $m['isSupervised'] ?? null,
 				'stale'            => $stale,
 			];
 			$row    = self::with_lifecycle( $row, (string) ( $d['operatingSystem'] ?? '' ), $m ? (string) ( $m['operatingSystem'] ?? '' ) : '', $m ? (string) ( $m['osVersion'] ?? '' ) : '', (string) ( $d['operatingSystemVersion'] ?? '' ) );
 			$rows[] = $row;
-			self::tally( $summary, $row );
+			self::tally( $summary, $row, $stale_days );
 
 			$summary['total']++;
 			if ( 'ServerAd' === $trust ) {
@@ -196,24 +214,9 @@ final class Devices extends Report_Base {
 			} elseif ( 'Workplace' === $trust ) {
 				$summary['registered']++;
 			}
-			if ( $stale ) {
-				$summary['stale']++;
-			}
-			if ( ! $row['enabled'] ) {
+			if ( false === $row['enabled'] ) {
 				$summary['disabled']++;
 			}
-			if ( $m ) {
-				$summary['intuneManaged']++;
-				if ( 'noncompliant' === strtolower( $row['compliance'] ) ) {
-					$summary['nonCompliant']++;
-				}
-				if ( null !== $days_sync && $days_sync > $stale_days ) {
-					$summary['intuneStale']++;
-				}
-			} else {
-				$summary['notInIntune']++;
-			}
-			$summary['byOs'][ $os ?: 'Desconhecido' ] = ( $summary['byOs'][ $os ?: 'Desconhecido' ] ?? 0 ) + 1;
 			$summary['byTrust'][ $class ]              = ( $summary['byTrust'][ $class ] ?? 0 ) + 1;
 		}
 
@@ -233,7 +236,7 @@ final class Devices extends Report_Base {
 				'osVersion'        => (string) ( $m['osVersion'] ?? '' ),
 				'trustType'        => '',
 				'classification'   => 'Somente Intune (sem objeto no Entra)',
-				'enabled'          => true,
+				'enabled'          => null,
 				'lastSignInEntra'  => '',
 				'daysSinceEntra'   => null,
 				'registered'       => '',
@@ -242,7 +245,7 @@ final class Devices extends Report_Base {
 				'ownership'        => (string) ( $m['managedDeviceOwnerType'] ?? '' ),
 				'managementType'   => '',
 				'profileType'      => '',
-				'syncedFromAd'     => false,
+				'syncedFromAd'     => null,
 				'manufacturer'     => (string) ( $m['manufacturer'] ?? '' ),
 				'model'            => (string) ( $m['model'] ?? '' ),
 				'autopilotProfile' => '',
@@ -257,24 +260,33 @@ final class Devices extends Report_Base {
 				'enrollmentType'   => (string) ( $m['deviceEnrollmentType'] ?? '' ),
 				'primaryUser'      => (string) ( $m['userPrincipalName'] ?? '' ),
 				'serial'           => (string) ( $m['serialNumber'] ?? '' ),
-				'encrypted'        => (bool) ( $m['isEncrypted'] ?? false ),
+				'encrypted'        => $m['isEncrypted'] ?? null,
 				'autopilot'        => null,
 				'category'         => (string) ( $m['deviceCategoryDisplayName'] ?? '' ),
-				'supervised'       => (bool) ( $m['isSupervised'] ?? false ),
+				'supervised'       => $m['isSupervised'] ?? null,
 				'stale'            => null === $days_sync || $days_sync > $stale_days,
 			];
 			$row    = self::with_lifecycle( $row, '', (string) ( $m['operatingSystem'] ?? '' ), (string) ( $m['osVersion'] ?? '' ), '' );
 			$rows[] = $row;
-			self::tally( $summary, $row );
+			self::tally( $summary, $row, $stale_days );
 		}
 		arsort( $summary['byOs'] );
 		arsort( $summary['byPlatform'] );
 		arsort( $summary['byRelease'] );
+		$managed_count = count( $intune ) + count( $unjoined );
+		if ( ! $intune_available ) {
+			foreach ( [ 'intuneManaged', 'notInIntune', 'nonCompliant', 'intuneStale', 'intuneOrphans', 'unencrypted' ] as $key ) {
+				$summary[ $key ] = null;
+			}
+			if ( in_array( null, array_column( $rows, 'stale' ), true ) ) {
+				$summary['stale'] = null;
+			}
+		}
 
 		return [
 			'rows'    => $rows,
 			'summary' => $summary,
-			'_meta'   => [ 'rows' => count( $rows ), 'intune' => (bool) ( $state['intune'] ?? false ), 'intuneError' => (string) ( $state['intune_error'] ?? '' ), 'intuneCount' => count( $intune ) + count( $unjoined ), 'stale_days' => $stale_days, 'lifecycleAsOf' => \J365TP\Os_Lifecycle::AS_OF ],
+			'_meta'   => [ 'rows' => count( $rows ), 'intune' => $intune_available, 'intuneError' => (string) ( $state['intune_error'] ?? '' ), 'intuneCount' => $intune_available ? $managed_count : null, 'previousEnrollments' => $intune_available ? count( $enrollments ) - $managed_count : null, 'stale_days' => $stale_days, 'lifecycleAsOf' => \J365TP\Os_Lifecycle::AS_OF ],
 		];
 	}
 
@@ -284,8 +296,11 @@ final class Devices extends Report_Base {
 	 */
 	private static function with_lifecycle( array $row, string $entra_os, string $intune_os, string $intune_ver, string $entra_ver ): array {
 		$name = '' !== $entra_os ? $entra_os : $intune_os;
-		$lc                 = \J365TP\Os_Lifecycle::evaluate( $name, '' !== $intune_ver ? $intune_ver : $entra_ver );
+		$row['os'] = $name;
+		$row['osVersion'] = '' !== $intune_ver ? $intune_ver : $entra_ver;
+		$lc                 = \J365TP\Os_Lifecycle::evaluate( $name, $row['osVersion'] );
 		$row['platform']    = $lc['platform'];
+		$row['osBuild']     = $lc['reportedBuild'] ?? '';
 		$row['osRelease']   = $lc['release'];
 		$row['support']     = $lc['support'];
 		$row['supportEnd']  = $lc['supportEnd'];
@@ -293,7 +308,27 @@ final class Devices extends Report_Base {
 		return $row;
 	}
 
-	private static function tally( array &$summary, array $row ): void {
+	private static function enrollment_order( array $device ): array {
+		return [ strtotime( $device['lastSyncDateTime'] ?? '' ) ?: 0, strtotime( $device['enrolledDateTime'] ?? '' ) ?: 0, (string) $device['id'] ];
+	}
+
+	private static function tally( array &$summary, array $row, int $stale_days ): void {
+		$os = $row['os'] ?: 'Desconhecido';
+		$summary['byOs'][ $os ] = ( $summary['byOs'][ $os ] ?? 0 ) + 1;
+		if ( $row['stale'] ) {
+			$summary['stale']++;
+		}
+		if ( $row['inIntune'] ) {
+			$summary['intuneManaged']++;
+			if ( 'noncompliant' === strtolower( $row['compliance'] ) ) {
+				$summary['nonCompliant']++;
+			}
+			if ( null === $row['daysSinceSync'] || $row['daysSinceSync'] > $stale_days ) {
+				$summary['intuneStale']++;
+			}
+		} elseif ( false === $row['inIntune'] ) {
+			$summary['notInIntune']++;
+		}
 		$summary['byPlatform'][ $row['platform'] ] = ( $summary['byPlatform'][ $row['platform'] ] ?? 0 ) + 1;
 		$summary['bySupport'][ $row['support'] ]   = ( $summary['bySupport'][ $row['support'] ] ?? 0 ) + 1;
 		if ( '' !== $row['osRelease'] ) {

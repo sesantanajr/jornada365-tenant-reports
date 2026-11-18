@@ -20,12 +20,19 @@ final class Apps extends Report_Base {
 	}
 
 	public function step( array $state, array $params, float $deadline ): array {
+		// A job started before incremental grouping can already contain normalized raw rows.
+		if ( ! empty( $state['detected'] ) ) {
+			foreach ( $state['detected'] as $row ) {
+				self::collect_detected( $state, $row );
+			}
+			unset( $state['detected'] );
+		}
 		if ( 0 === $state['phase'] ) {
 			try {
 				$done = $this->fetch_collection(
 					$state,
 					'detected',
-					'/v1.0/deviceManagement/detectedApps?$select=id,displayName,version,publisher,platform,deviceCount,sizeInByte&$top=1000',
+					'/v1.0/deviceManagement/detectedApps?$select=id,displayName,version,publisher,platform,deviceCount&$top=1000',
 					$deadline,
 					[],
 					fn( $a ) => [
@@ -35,8 +42,8 @@ final class Apps extends Report_Base {
 						'publisher' => (string) ( $a['publisher'] ?? '' ),
 						'platform'  => (string) ( $a['platform'] ?? 'unknown' ),
 						'devices'   => (int) ( $a['deviceCount'] ?? 0 ),
-						'size'      => (int) ( $a['sizeInByte'] ?? 0 ),
-					]
+					],
+					[ self::class, 'collect_detected' ]
 				);
 			} catch ( Graph_Exception $e ) {
 				if ( in_array( $e->getCode(), [ 403, 404 ], true ) ) {
@@ -45,9 +52,12 @@ final class Apps extends Report_Base {
 				throw $e;
 			}
 			if ( ! $done ) {
-				return [ 'state' => $state, 'progress' => count( $state['detected'] ), 'total' => 0, 'done' => false, 'message' => sprintf( '%d entradas de aplicativos…', count( $state['detected'] ) ) ];
+				$n = $state['entries'] ?? 0;
+				return [ 'state' => $state, 'progress' => $n, 'total' => 0, 'done' => false, 'message' => sprintf( '%d entradas de aplicativos…', $n ) ];
 			}
-			$state['phase'] = 1;
+			$tenant              = Tenant_Repository::get( $this->tenant_id ) ?? [ 'settings' => [] ];
+			$state['autoIntune'] = (bool) Tenant_Repository::get_setting( $tenant, 'auto_approve_intune_apps', true );
+			$state['phase']      = $state['autoIntune'] && ! empty( $state['entries'] ) ? 1 : 2;
 		}
 
 		if ( 1 === $state['phase'] ) {
@@ -56,34 +66,33 @@ final class Apps extends Report_Base {
 				$done = $this->fetch_collection(
 					$state,
 					'mobile',
-					'/v1.0/deviceManagement/mobileApps?$select=id,displayName,publisher,publishingState&$top=999', // v1.0: no isAssigned
+					'/v1.0/deviceAppManagement/mobileApps?$select=displayName,publishingState&$top=999',
 					$deadline,
 					[],
 					fn( $a ) => [
 						'name'      => (string) ( $a['displayName'] ?? '' ),
-						'publisher' => (string) ( $a['publisher'] ?? '' ),
-						'type'      => (string) ( $a['@odata.type'] ?? '' ),
-						'published' => 'notPublished' !== (string) ( $a['publishingState'] ?? 'published' ),
+						'published' => 'published' === ( $a['publishingState'] ?? '' ),
 					]
 				);
 			} catch ( Graph_Exception $e ) {
 				$this->optional_error( $state, 'Aplicativos implantados pelo Intune (mobileApps) indisponíveis', $e );
 				$state['mobile'] = [];
+				$state['catalogUnavailable'] = true;
 				$done            = true;
 			}
 			if ( ! $done ) {
-				return [ 'state' => $state, 'progress' => count( $state['detected'] ), 'total' => 0, 'done' => false, 'message' => 'Carregando catálogo do Intune…' ];
+				return [ 'state' => $state, 'progress' => $state['entries'] ?? 0, 'total' => 0, 'done' => false, 'message' => 'Carregando catálogo do Intune…' ];
 			}
 			$state['phase'] = 2;
 		}
 
-		$n = count( $state['detected'] );
+		$n = $state['entries'] ?? 0;
 		return [ 'state' => $state, 'progress' => $n, 'total' => $n, 'done' => true, 'message' => 'Concluído' ];
 	}
 
 	public function finalize( array $state, array $params ): array {
 		$tenant         = Tenant_Repository::get( $this->tenant_id ) ?? [ 'settings' => [] ];
-		$auto_intune    = (bool) Tenant_Repository::get_setting( $tenant, 'auto_approve_intune_apps', true );
+		$auto_intune    = $state['autoIntune'] ?? (bool) Tenant_Repository::get_setting( $tenant, 'auto_approve_intune_apps', true );
 		$trust_ms       = (bool) Tenant_Repository::get_setting( $tenant, 'trust_microsoft_publisher', false );
 		$rules          = Allowlist_Repository::all( $this->tenant_id );
 		$intune_catalog = [];
@@ -91,51 +100,29 @@ final class Apps extends Report_Base {
 			if ( false === ( $m['published'] ?? true ) ) {
 				continue; // uploads still processing / not published are not considered homologated
 			}
-			$intune_catalog[ self::norm( $m['name'] ) ] = $m;
-		}
-
-		$groups = [];
-		foreach ( $state['detected'] ?? [] as $a ) {
-			$key = self::norm( $a['name'] ) . '|' . strtolower( $a['platform'] );
-			if ( ! isset( $groups[ $key ] ) ) {
-				$groups[ $key ] = [
-					'name'       => $a['name'],
-					'publisher'  => $a['publisher'],
-					'platform'   => $a['platform'],
-					'versions'   => [],
-					'deviceCount' => 0,
-					'ids'        => [],
-				];
-			}
-			$g                    = &$groups[ $key ];
-			$g['deviceCount']    += $a['devices'];
-			$g['versions'][]      = [ 'version' => $a['version'] ?: '(sem versão)', 'devices' => $a['devices'], 'id' => $a['id'] ];
-			$g['ids'][]           = $a['id'];
-			if ( '' === $g['publisher'] && '' !== $a['publisher'] ) {
-				$g['publisher'] = $a['publisher'];
-			}
-			unset( $g );
+			$intune_catalog[ self::norm( $m['name'] ) ] = true;
 		}
 
 		$rows    = [];
 		$summary = [
 			'apps'            => 0,
-			'entries'         => count( $state['detected'] ?? [] ),
+			'entries'         => $state['entries'] ?? 0,
 			'approved'        => 0,
 			'notApproved'     => 0,
+			'unknown'         => 0,
 			'approvedIntune'  => 0,
 			'approvedAllowlist' => 0,
 			'approvedPublisher' => 0,
 			'multiVersion'    => 0,
 			'byPlatform'      => [],
-			'intuneCatalog'   => count( $intune_catalog ),
+			'intuneCatalog'   => $auto_intune && empty( $state['catalogUnavailable'] ) && ! empty( $state['entries'] ) ? count( $intune_catalog ) : null,
 		];
 
-		foreach ( $groups as $g ) {
+		foreach ( $state['groups'] ?? [] as $g ) {
 			usort( $g['versions'], fn( $x, $y ) => version_compare( self::vclean( $y['version'] ), self::vclean( $x['version'] ) ) );
 			$approved_by = '';
 			if ( $auto_intune && isset( $intune_catalog[ self::norm( $g['name'] ) ] ) ) {
-				$approved_by = 'Intune (implantado)';
+				$approved_by = 'Catálogo publicado do Intune';
 				$summary['approvedIntune']++;
 			} elseif ( null !== ( $rule = Allowlist_Repository::match( $rules, $g['name'], $g['publisher'], $g['platform'] ) ) ) {
 				$approved_by = $rule;
@@ -145,6 +132,7 @@ final class Apps extends Report_Base {
 				$summary['approvedPublisher']++;
 			}
 
+			$known = '' !== $approved_by || empty( $state['catalogUnavailable'] );
 			$rows[] = [
 				'name'          => $g['name'],
 				'publisher'     => $g['publisher'],
@@ -154,11 +142,12 @@ final class Apps extends Report_Base {
 				'versions'      => $g['versions'],
 				'deviceCount'   => $g['deviceCount'],
 				'approved'      => '' !== $approved_by,
+				'approvalKnown' => $known,
 				'approvedBy'    => $approved_by,
-				'ids'           => $g['ids'],
+				'ids'           => array_column( $g['versions'], 'id' ),
 			];
 			$summary['apps']++;
-			$summary[ '' !== $approved_by ? 'approved' : 'notApproved' ]++;
+			$summary[ $known ? ( '' !== $approved_by ? 'approved' : 'notApproved' ) : 'unknown' ]++;
 			if ( count( $g['versions'] ) > 1 ) {
 				$summary['multiVersion']++;
 			}
@@ -172,6 +161,20 @@ final class Apps extends Report_Base {
 			'settings' => [ 'auto_approve_intune_apps' => $auto_intune, 'trust_microsoft_publisher' => $trust_ms ],
 			'_meta'    => [ 'rows' => count( $rows ) ],
 		];
+	}
+
+	protected static function collect_detected( array &$state, array $a ): void {
+		$key = self::norm( $a['name'] ) . '|' . strtolower( $a['platform'] );
+		if ( ! isset( $state['groups'][ $key ] ) ) {
+			$state['groups'][ $key ] = [ 'name' => $a['name'], 'publisher' => $a['publisher'], 'platform' => $a['platform'], 'versions' => [], 'deviceCount' => 0 ];
+		}
+		$group = &$state['groups'][ $key ];
+		$group['deviceCount'] += $a['devices'];
+		$group['versions'][] = [ 'version' => $a['version'] ?: '(sem versão)', 'devices' => $a['devices'], 'id' => $a['id'] ];
+		if ( '' === $group['publisher'] ) {
+			$group['publisher'] = $a['publisher'];
+		}
+		$state['entries'] = ( $state['entries'] ?? 0 ) + 1;
 	}
 
 	private static function norm( string $s ): string {

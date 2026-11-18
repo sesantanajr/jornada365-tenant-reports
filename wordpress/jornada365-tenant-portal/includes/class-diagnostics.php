@@ -33,7 +33,7 @@ final class Diagnostics {
 			return new WP_REST_Response( [ 'ok' => false, 'message' => 'Registre o aplicativo pelo portal antes de testar.' ], 409 );
 		}
 		$only  = sanitize_key( (string) ( $request->get_param( 'type' ) ?? '' ) );
-		$types = '' !== $only ? [ $only ] : array_values( array_diff( Settings::active_reports(), [ 'app_devices' ] ) );
+		$types = '' !== $only ? [ $only ] : array_values( array_diff( Settings::active_reports(), [ 'app_devices', 'app_assignments', 'app_failures', 'device_compliance' ] ) );
 		@set_time_limit( 900 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		$results = [];
 		foreach ( $types as $type ) {

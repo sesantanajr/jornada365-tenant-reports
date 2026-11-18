@@ -116,6 +116,13 @@ final class Graph_Client {
 		return $this->request( 'POST', '/v1.0/directoryObjects/getByIds', [ 'ids' => $ids, 'types' => $types ], [], true );
 	}
 
+	/** These two Intune reporting actions read data. Replaying their POST after a timeout is safe. */
+	public function intune_install_report( array $body, bool $per_device ): array {
+		$path = $per_device ? '/v1.0/deviceManagement/reports/microsoft.graph.retrieveDeviceAppInstallationStatusReport'
+			: '/beta/deviceManagement/reports/microsoft.graph.getAppsInstallSummaryReport';
+		return $this->request( 'POST', $path, $body, [ 'Accept' => '*/*', 'Accept-Language' => 'en-US' ], true );
+	}
+
 	/** PATCH (204 No Content returns an empty array). Used only with delegated tokens (actions). */
 	public function patch( string $path, array $body, array $headers = [] ): array {
 		return $this->request( 'PATCH', $path, $body, $headers );

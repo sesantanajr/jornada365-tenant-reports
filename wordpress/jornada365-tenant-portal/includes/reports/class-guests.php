@@ -70,7 +70,8 @@ final class Guests extends Report_Base {
 			$rows[] = array_merge( $g, [ 'daysSinceSignIn' => $days, 'stale' => $stale, 'pending' => 'PendingAcceptance' === $g['state'] ] );
 
 			$summary['total']++;
-			$summary[ 'PendingAcceptance' === $g['state'] ? 'pending' : 'accepted' ]++;
+			$summary['pending']  += 'PendingAcceptance' === $g['state'] ? 1 : 0;
+			$summary['accepted'] += 'Accepted' === $g['state'] ? 1 : 0;
 			$summary['disabled']    += $g['enabled'] ? 0 : 1;
 			$summary['stale']       += $stale ? 1 : 0;
 			$summary['neverSignIn'] += ( $state['premium'] && null === $days ) ? 1 : 0;

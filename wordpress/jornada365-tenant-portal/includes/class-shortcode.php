@@ -88,7 +88,7 @@ final class Shortcode {
 	public static function report_count(): int {
 		// Actions (act_*) are not reports; the identity report is shown as two views (users + inactive).
 		$active = array_values( array_filter( Settings::active_reports(), static fn( $r ) => ! str_starts_with( (string) $r, 'act_' ) ) );
-		return count( array_diff( $active, [ 'app_devices' ] ) ) + ( in_array( 'identity', $active, true ) ? 1 : 0 );
+		return count( array_diff( $active, [ 'app_devices', 'app_assignments', 'app_failures', 'device_compliance' ] ) ) + ( in_array( 'identity', $active, true ) ? 1 : 0 );
 	}
 
 	/** Runtime configuration handed to the front-end. */

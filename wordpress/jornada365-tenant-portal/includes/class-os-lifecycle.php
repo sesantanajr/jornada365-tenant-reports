@@ -132,8 +132,9 @@ final class Os_Lifecycle {
 	private static function windows( string $os, string $version, string $platform, string $now, array $out ): array {
 		// "10.0.22631.4317" (Entra/Intune) or "10.0 (19045)" (hybrid objects synced from AD).
 		$build = 0;
-		if ( preg_match( '/^\s*\d+\.\d+\.(\d{4,5})/', $version, $m ) || preg_match( '/\((\d{4,5})\)/', $version, $m ) ) {
+		if ( preg_match( '/^\s*\d+\.\d+\.(\d+)(?:\.|$)/', $version, $m ) || preg_match( '/\((\d+)\)/', $version, $m ) ) {
 			$build = (int) $m[1];
+			$out['reportedBuild'] = $m[1];
 		} elseif ( preg_match( '/^\s*6\.3/', $version ) ) {
 			$build = 9600;
 		} elseif ( preg_match( '/^\s*6\.2/', $version ) ) {

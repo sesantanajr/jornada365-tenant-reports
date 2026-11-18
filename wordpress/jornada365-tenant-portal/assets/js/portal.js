@@ -198,7 +198,7 @@
   }
   const textOf = (v) => (v instanceof Node ? v.textContent.trim() : t(String(v ?? '')));
   // Directory names and identifiers belong to the tenant, even when they match a UI translation.
-  const verbatimColumn = (key) => /^(?:id|upn|mail|name|displayName|company|department|jobTitle|domain|owner|ownerUpn|user|primaryUser|publisher|manufacturer|model|serial|url|ip|notes|app_name|.*Id)$/.test(key || '');
+  const verbatimColumn = (key) => /^(?:id|upn|mail|name|displayName|company|department|jobTitle|domain|owner|ownerUpn|user|primaryUser|publisher|manufacturer|model|serial|url|ip|notes|policy|setting|instance|description|app_name|.*Id)$/.test(key || '');
   /** Value as it goes to a cell: numbers stay numbers, ISO dates become Excel dates, the rest translated text. */
   function cellOf(v, key) {
     if (v === null || v === undefined || v === '' || v === '—') return { v: null, k: '' };
@@ -252,7 +252,7 @@
     return null;
   }
   /** Sheet names of each area in the executive workbook (≤ 31 characters). */
-  const SHEET_NAMES = { overview: 'Visão geral', identity: 'Usuários', inactive: 'Contas inativas', mfa: 'MFA', guests: 'Convidados', privileged: 'Acessos privilegiados', risk: 'Risco', devices: 'Dispositivos', apps: 'Aplicativos', ca: 'Acesso Condicional', authpolicies: 'Autenticação', appsec: 'Apps e consentimentos', securescore: 'Secure Score', licensing: 'Licenças', usage: 'Uso do M365', mailboxes: 'Caixas de correio', storage: 'OneDrive e SharePoint', groups: 'Grupos', domains: 'Domínios' };
+  const SHEET_NAMES = { overview: 'Visão geral', identity: 'Usuários', inactive: 'Contas inativas', mfa: 'MFA', guests: 'Convidados', privileged: 'Acessos privilegiados', risk: 'Risco', devices: 'Dispositivos', apps: 'Aplicativos', ca: 'Acesso Condicional', authpolicies: 'Autenticação', appsec: 'Apps e consentimentos', securescore: 'Secure Score', identityscore: 'Identity Score', licensing: 'Licenças', usage: 'Uso do M365', mailboxes: 'Caixas de correio', storage: 'OneDrive e SharePoint', groups: 'Grupos', domains: 'Domínios' };
   const SEVERITY = { danger: 0, warn: 1, info: 2, ok: 3 };
   const TONE_LABEL = { danger: 'Crítico', warn: 'Atenção', info: 'Informativo', ok: 'OK' };
   /**
@@ -501,16 +501,17 @@
     /** Distribution: small table (category, quantity, share) + native chart. */
     function distBlock(ws, r, b) {
       const isBytes = b.opts && b.opts.fmt === bytes;
-      const items = b.items.filter(([, v]) => +v > 0).slice(0, 12);
+      const timeSeries = b.opts?.kind === 'scoreHistory';
+      const items = (timeSeries ? b.items : b.items.filter(([, v]) => +v > 0)).slice(0, 12);
       if (!items.length) return r;
-      const total = b.total || items.reduce((a, [, v]) => a + (+v || 0), 0);
-      const val = (v) => (isBytes ? Math.round(((+v || 0) / 1073741824) * 100) / 100 : +v || 0);
+      const total = Number.isFinite(+b.total) && +b.total > 0 && items.every(([, value]) => +value <= +b.total) ? +b.total : 0;
+      const val = (v) => timeSeries ? v : (isBytes ? Math.round(((+v || 0) / 1073741824) * 100) / 100 : +v || 0);
       ws.height(r, 22).set(r, 1, b.title || t('Detalhamento'), st.h3).merge(r, 1, r, 6);
       r++;
       const top = r;
-      ws.set(r, 1, t('Categoria'), st.th).merge(r, 1, r, 3); ws.set(r, 2, null, st.th); ws.set(r, 3, null, st.th);
-      ws.set(r, 4, t(isBytes ? 'Tamanho' : 'Quantidade'), st.thR);
-      ws.set(r, 5, '%', st.thR);
+      ws.set(r, 1, t(timeSeries ? 'Data da medição' : 'Categoria'), st.th).merge(r, 1, r, 3); ws.set(r, 2, null, st.th); ws.set(r, 3, null, st.th);
+      ws.set(r, 4, t(timeSeries ? 'Pontuação (%)' : (isBytes ? 'Tamanho' : 'Quantidade')), st.thR);
+      if (!timeSeries) ws.set(r, 5, '%', st.thR);
       r++;
       const first = r;
       for (const [label, v] of items) {
@@ -523,10 +524,11 @@
       }
       const last = r - 1;
       ws.dataBar(first, 4, last, 4, '5AB8F5');
-      const dough = (b.opts && b.opts.kind === 'donut') || (b.auto && !b.multi && items.length <= 6 && !isBytes);
+      const complete = total > 0 && items.reduce((sum, [, value]) => sum + Number(value), 0) === total;
+      const dough = complete && ((b.opts && b.opts.kind === 'donut') || (b.auto && !b.multi && items.length <= 6 && !isBytes));
       const colors = items.map(([, , , tone], i) => xlColor(tone) || XL.palette[i % XL.palette.length]);
       const height = Math.max(last - top + 1, 12);
-      ws.chart({ type: dough ? 'doughnut' : 'bar', title: b.title || '', cats: [first, 1, last, 1], vals: [first, 4, last, 4], labels: items.map(([l]) => textOf(l)), values: items.map(([, v]) => val(v)), colors: dough ? colors : (colors.some((c, i) => c !== XL.palette[i % XL.palette.length]) ? colors : [XL.blue]), from: [7, top - 1], to: [COLS + 1, top - 1 + height] });
+      ws.chart({ type: timeSeries ? 'col' : (dough ? 'doughnut' : 'bar'), percentScale: timeSeries, title: b.title || '', cats: [first, 1, last, 1], vals: [first, 4, last, 4], labels: items.map(([l]) => textOf(l)), values: items.map(([, v]) => val(v)), colors: dough ? colors : (colors.some((c, i) => c !== XL.palette[i % XL.palette.length]) ? colors : [XL.blue]), from: [7, top - 1], to: [COLS + 1, top - 1 + height] });
       return Math.max(r, top - 1 + height) + 2;
     }
 
@@ -734,7 +736,7 @@
       }
       return '';
     };
-    const bars = [...panel.querySelectorAll('ul.bars, .donut')].filter(mine).map((el) => {
+    const bars = [...panel.querySelectorAll('ul.bars, .donut, .score-days')].filter(mine).map((el) => {
       const d = BAR_DATA.get(el);
       return d ? Object.assign({ title: heading(el) }, d) : null;
     }).filter(Boolean);
@@ -773,7 +775,7 @@
   }
 
   /** Views worth a section in the executive workbook (actions and administration are not reports). */
-  const EXEC_VIEWS = ['overview', 'identity', 'inactive', 'mfa', 'guests', 'privileged', 'risk', 'devices', 'apps', 'ca', 'authpolicies', 'appsec', 'securescore', 'licensing', 'usage', 'mailboxes', 'storage', 'groups', 'domains'];
+  const EXEC_VIEWS = ['overview', 'identity', 'inactive', 'mfa', 'guests', 'privileged', 'risk', 'devices', 'apps', 'managed_apps', 'intune_assignments', 'ca', 'authpolicies', 'appsec', 'securescore', 'identityscore', 'licensing', 'usage', 'mailboxes', 'storage', 'groups', 'domains'];
   const EXEC_DEFAULT = ['overview', 'identity', 'inactive', 'mfa', 'privileged', 'risk', 'devices', 'ca', 'securescore', 'licensing', 'mailboxes', 'storage'];
   /** Renders views off-screen (the same code that draws the screen), waits for their reports and collects what they show. */
   async function harvestViews(ids, onStep) {
@@ -887,7 +889,7 @@
 
   /* ------------------------------------------------------------- table */
   /* select: { set: Set, id: (r) => key, can: (r) => bool, why: (r) => tooltip, onChange: () => void } */
-  function DataTable({ rows, columns, filters = [], segments = null, searchKeys, name, pageSize = 50, onRowClick, emptyText = 'Nenhum registro.', compact = false, select = null, onDraw = null, sheet = '' }) {
+  function DataTable({ rows, columns, filters = [], facets = [], segments = null, searchKeys, name, pageSize = 50, onRowClick, emptyText = 'Nenhum registro.', compact = false, select = null, onDraw = null, sheet = '' }) {
     filters = (filters || []).filter(Boolean); // views may pass conditional filters as null
     const state = { q: '', filter: filters.find((f) => f.default)?.id || null, seg: (segments && segments.value) || 'all', sort: null, dir: 1, page: 0, pageSize };
     const shown = columns.filter((c) => !c.exportOnly);
@@ -903,21 +905,58 @@
     const btnXlsx = h('button', { class: 'btn sm xl', onclick: (e) => { const b = e.currentTarget; b.disabled = true; exportExcel(wrap, current(), columns, name, describe()).finally(() => { b.disabled = false; }); } }, icon('sheet'), raw('Excel'));
     toolbar.append(h('label', { class: 'search' }, icon('search'), search), count, h('div', { class: 'tb-actions' }, btnCsv, btnXlsx));
     const tablewrap = h('div', { class: 'tablewrap', tabindex: '0', role: 'region', 'aria-label': 'Tabela de resultados' });
+    const columnOptions = shown.flatMap((col, i) => col.label ? [h('option', { value: String(i + (select ? 1 : 0)) }, col.label)] : []);
+    if (columnOptions.length > 1) {
+      const jump = h('select', { class: 'j365-input column-jump', 'aria-label': 'Ir para coluna', onchange: (event) => {
+        const input = event.currentTarget;
+        if (input.value === '') return;
+        const cell = tablewrap.querySelector('thead tr')?.children[Number(input.value)];
+        if (cell) {
+          tablewrap.scrollLeft += cell.getBoundingClientRect().left - tablewrap.getBoundingClientRect().left - tablewrap.clientLeft;
+          const target = cell.querySelector('button') || cell;
+          if (target === cell) cell.tabIndex = -1;
+          target.focus({ preventScroll: true });
+        }
+        input.value = '';
+      } }, h('option', { value: '' }, 'Ir para coluna'), ...columnOptions);
+      toolbar.append(jump);
+    }
+    const selectedFacets = new Map();
+    const facetBar = facets.length ? h('div', { class: 'facet-bar', role: 'group', 'aria-label': 'Filtros' }) : null;
+    const facetInputs = facets.map(({ key, label }) => {
+      const input = h('select', { class: 'j365-input', 'aria-label': label, onchange: () => {
+        if (input.value === '') selectedFacets.delete(key);
+        else selectedFacets.set(key, input.value.slice(1));
+        state.page = 0;
+        draw(false);
+      } });
+      facetBar.append(h('label', null, h('span', null, label), input));
+      return { key, label, input };
+    });
     const emptyState = h('div', { class: 'dt-empty', hidden: true });
     const pager = h('div', { class: 'pager' });
-    wrap.append(...(segBar ? [segBar] : []), toolbar, chips, tablewrap, emptyState, pager);
+    wrap.append(...(segBar ? [segBar] : []), toolbar, ...(facetBar ? [facetBar] : []), chips, tablewrap, emptyState, pager);
 
     const keys = searchKeys || columns.map((c) => c.key).filter(Boolean);
     const segItem = () => (segments ? segments.items.find((x) => x.id === state.seg) : null);
     function base() { const sg = segItem(); return sg && sg.fn ? rows.filter(sg.fn) : rows; }
     // Search matches the raw value and its translation ("Híbrido" and "Hybrid").
     const hay = (v) => (Array.isArray(v) ? v : [v]).filter((x) => x !== null && x !== undefined && typeof x !== 'object').map((x) => String(x) + ' ' + t(String(x))).join(' ').toLowerCase();
-    function current() {
+    function baseMatches() {
       let out = base();
       const f = filters.find((x) => x.id === state.filter);
       if (f && f.fn) out = out.filter(f.fn);
       if (state.match) { const { key, value } = state.match; out = out.filter((r) => (Array.isArray(r[key]) ? r[key].includes(value) : r[key] === value)); }
       if (state.q) out = out.filter((r) => keys.some((k) => { const v = r[k]; return v !== null && v !== undefined && v !== '' && hay(v).includes(state.q); }));
+      return out;
+    }
+    const facetValue = (row, key) => String(row[key] ?? '');
+    function matchesFacets(row, except) {
+      for (const [key, value] of selectedFacets) if (key !== except && facetValue(row, key) !== value) return false;
+      return true;
+    }
+    function current(pool = baseMatches()) {
+      let out = selectedFacets.size ? pool.filter((row) => matchesFacets(row)) : pool;
       if (state.sort) {
         const col = columns.find((c) => c.key === state.sort);
         const val = (r) => (col.sortValue ? col.sortValue(r) : (col.value ? col.value(r) : r[col.key]));
@@ -930,6 +969,27 @@
         }).map(({ row }) => row);
       }
       return out;
+    }
+    let lastFacetState = '';
+    function drawFacets(pool) {
+      if (!facetInputs.length) return;
+      const signature = JSON.stringify([state.q, state.seg, state.filter, state.match?.key, state.match?.value, [...selectedFacets]]);
+      if (signature === lastFacetState) return;
+      lastFacetState = signature;
+      for (const { key, input } of facetInputs) {
+        const counts = new Map();
+        for (const row of pool) {
+          if (!matchesFacets(row, key)) continue;
+          const value = facetValue(row, key);
+          counts.set(value, (counts.get(value) || 0) + 1);
+        }
+        const active = selectedFacets.get(key);
+        if (active !== undefined && !counts.has(active)) counts.set(active, 0);
+        const values = [...counts.keys()].sort(new Intl.Collator(CFG.intl || 'pt-BR', { numeric: true }).compare);
+        input.replaceChildren(h('option', { value: '' }, 'Todas'), ...values.map((v) =>
+          h('option', { value: '=' + v }, raw((v || t('Não informado')) + ' (' + num(counts.get(v)) + ')'))));
+        input.value = active === undefined ? '' : '=' + active;
+      }
     }
     function drawSegs() {
       if (!segBar) return;
@@ -958,7 +1018,9 @@
         drawSegs();
         drawChips();
       }
-      const data = current();
+      const pool = baseMatches();
+      drawFacets(pool);
+      const data = current(pool);
       count.textContent = t('{a} de {b}', { a: num(data.length), b: num(rows.length) });
       const pages = Math.max(1, Math.ceil(data.length / state.pageSize));
       state.page = Math.min(state.page, pages - 1);
@@ -989,10 +1051,11 @@
       emptyState.replaceChildren();
       emptyState.hidden = slice.length > 0;
       if (!slice.length) {
-        const filtered = rows.length > 0 && (state.q || state.filter || state.match || state.seg !== 'all');
+        const filtered = rows.length > 0 && (state.q || state.filter || state.match || state.seg !== 'all' || selectedFacets.size);
         const reset = () => {
           clearTimeout(qTimer);
           state.q = ''; search.value = ''; state.match = null; state.filter = null; state.page = 0;
+          selectedFacets.clear();
           if (segments && state.seg !== 'all' && segments.items.some((s) => s.id === 'all')) {
             state.seg = 'all';
             segments.onChange?.('all');
@@ -1041,6 +1104,9 @@
       const f = filters.find((x) => x.id === state.filter);
       if (f) parts.push(t('Filtro') + ': ' + t(f.label));
       if (state.match) parts.push(state.match.label);
+      for (const { key, label } of facetInputs) {
+        if (selectedFacets.has(key)) parts.push(t(label) + ': ' + (selectedFacets.get(key) || t('Não informado')));
+      }
       if (state.q) parts.push(t('Pesquisa') + ': "' + state.q + '"');
       return parts.length ? parts.join(' · ') : t('Todos os registros');
     }
@@ -1084,16 +1150,17 @@
 
   /* Compact horizontal bars for distributions: [[label, count, onclick?], …]. Labels are translated. */
   function barList(entries, total, opts = {}) {
-    const rows = entries.filter(([, v]) => +v > 0).slice(0, opts.limit || 40);
+    const rows = entries.filter(([, v]) => Number.isFinite(+v) && +v > 0).slice(0, opts.limit || 40);
     if (!rows.length) return h('p', { class: 'muted small' }, 'Nenhum registro.');
-    const max = Math.max(1, ...rows.map(([, v]) => +v || 0));
+    const max = Math.max(...rows.map(([, v]) => +v));
+    const denominator = Number.isFinite(+total) && +total >= max ? +total : 0;
     const ul = h('ul', { class: 'bars' });
-    BAR_DATA.set(ul, { items: rows, total, opts });
+    BAR_DATA.set(ul, { items: rows, total: denominator, opts });
     for (const [label, v, onclick] of rows) {
-      const pct = total ? Math.round((100 * v) / total) : null;
+      const width = (100 * v) / (denominator || max);
       const li = h(onclick ? 'button' : 'li', { class: 'bar-row' + (onclick ? ' link' : ''), type: onclick ? 'button' : null, onclick: onclick || null },
-        h('span', { class: 'bl' }, label), h('span', { class: 'bt', 'aria-hidden': 'true' }, h('i', { style: `width:${Math.max(2, Math.round((100 * v) / max))}%` })),
-        h('span', { class: 'bv' }, raw((opts.fmt ? opts.fmt(v) : num(v)) + (pct !== null ? ` · ${pct}%` : ''))));
+        h('span', { class: 'bl' }, label), h('span', { class: 'bt', 'aria-hidden': 'true' }, h('i', { style: `width:${width}%` })),
+        h('span', { class: 'bv' }, raw((opts.fmt ? opts.fmt(v) : num(v)) + (denominator ? ' · ' + fmtPct(width) : ''))));
       ul.append(onclick ? h('li', null, li) : li);
     }
     return ul;
@@ -1114,15 +1181,20 @@
   // Categorical palette (brand blues first); status colours come from the tones.
   const VIZ = ['#0068b8', '#3cc8ee', '#2bb3a3', '#7c5cdb', '#e58a1f', '#5a7fa8', '#0e9a5b', '#c2477a', '#00a2e8', '#b07d2b'];
   const TONE_HEX = { ok: '#12a15e', warn: '#d98a0b', danger: '#d93f3f', info: '#0072c6', muted: '#9fb3c8' };
-  const pctOf = (a, b) => (b ? (100 * a) / b : null);
-  const fmtPct = (p) => (p === null || p === undefined || !isFinite(p) ? '—' : (p > 0 && p < 1 ? '<1' : num(Math.round(p))) + '%');
+  const pctOf = (a, b) => (a !== null && a !== undefined && a !== '' && Number.isFinite(+a) && Number.isFinite(+b) && +b > 0 ? 100 * a / b : null);
+  const fmtPct = (p) => {
+    if (p === null || p === undefined || !Number.isFinite(+p)) return '—';
+    if (p > 0 && p < 1) return '<1%';
+    if (p > 99 && p < 100) return '>99%';
+    return num(Math.round(p)) + '%';
+  };
   /** Tone of a share: higher is better (≥ ok → ok, ≥ warn → warn, else danger), or lower is better with invert. */
   const toneFor = (p, ok = 90, warn = 75, invert = false) => (p === null || p === undefined || !isFinite(p) ? 'info' : invert ? (p <= ok ? 'ok' : p <= warn ? 'warn' : 'danger') : (p >= ok ? 'ok' : p >= warn ? 'warn' : 'danger'));
   let svgSeq = 0;
   /** Health ring { pct, tone }: the arc and the number animate once when the report arrives. */
   function ring(spec) {
-    const pct = Math.max(0, Math.min(100, Number(spec.pct) || 0));
-    const C = 2 * Math.PI * 52, id = 'jg' + (++svgSeq), target = (C * (1 - pct / 100)).toFixed(2);
+    const pct = Number(spec.pct);
+    const C = 2 * Math.PI * 52, id = 'jg' + (++svgSeq), target = (C * (1 - Math.min(100, Math.max(0, pct)) / 100)).toFixed(2);
     const el = h('div', { class: 'ring ' + (spec.tone || 'info'), role: 'img', 'aria-label': fmtPct(pct) + ' — ' + t(spec.label || '') });
     el.innerHTML = `<svg viewBox="0 0 120 120" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="s1"/><stop offset="1" class="s2"/></linearGradient></defs><circle class="ring-track" cx="60" cy="60" r="52"/><circle class="ring-val" cx="60" cy="60" r="52" stroke="url(#${id})" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${J.RM ? target : C.toFixed(2)}" transform="rotate(-90 60 60)"/></svg>`;
     const b = h('b', null, raw(J.RM ? fmtPct(pct) : '0%'));
@@ -1138,22 +1210,31 @@
   }
   /** Donut + legend for a distribution [[label, value, onclick?, tone?]] — read by the Excel export like bar lists. */
   function donut(entries, { total = null, center = null, centerLabel = '', fmt = null, key = '' } = {}) {
-    const items = entries.filter(([, v]) => +v > 0);
+    const items = entries.filter(([, v]) => Number.isFinite(+v) && +v > 0);
     const sum = items.reduce((a, [, v]) => a + (+v || 0), 0);
+    const knownTotal = total !== null && Number.isFinite(+total) && +total >= 0;
+    // Overlapping counts cannot partition a circle. A partial partition includes its unclassified remainder.
+    if (knownTotal && sum > +total) return barList(items, total, { fmt, key });
+    const base = knownTotal ? +total : sum;
+    if (base > sum) items.push([t('Sem classificação'), base - sum, null, 'muted']);
     const wrap = h('div', { class: 'donut' });
-    BAR_DATA.set(wrap, { items, total: total || sum, opts: { kind: 'donut', fmt, key } });
+    BAR_DATA.set(wrap, { items, total: base, opts: { kind: 'donut', fmt, key } });
     if (!items.length) { wrap.append(h('p', { class: 'muted small' }, 'Nenhum registro.')); return wrap; }
     let off = 0, k = 0;
-    const gap = items.length > 1 ? 0.8 : 0;
-    const segs = items.map(([, v, , tone]) => { const p = (100 * (+v || 0)) / sum; const sg = { p, off, len: Math.max(0.3, p - gap), color: tone ? (TONE_HEX[tone] || tone) : VIZ[k++ % VIZ.length] }; off += p; return sg; });
+    const segs = items.map(([, value, , tone]) => {
+      const len = 100 * value / base;
+      const segment = { off, len, color: tone ? (TONE_HEX[tone] || tone) : VIZ[k++ % VIZ.length] };
+      off += len;
+      return segment;
+    });
     const chart = h('div', { class: 'd-chart' });
     chart.innerHTML = `<svg viewBox="0 0 42 42" aria-hidden="true"><circle class="d-track" cx="21" cy="21" r="15.915"/>${segs.map((sg, i) => `<circle class="d-seg" cx="21" cy="21" r="15.915" pathLength="100" stroke="${sg.color}" stroke-dasharray="${J.RM ? `${sg.len.toFixed(2)} ${(100 - sg.len).toFixed(2)}` : '0 100'}" stroke-dashoffset="${(25 - sg.off).toFixed(2)}" style="--i:${i}"/>`).join('')}</svg>`;
-    chart.append(h('div', { class: 'd-center' }, h('b', null, raw(center !== null && center !== undefined ? String(center) : (fmt ? fmt(sum) : num(sum)))), centerLabel ? h('span', null, centerLabel) : null));
+    chart.append(h('div', { class: 'd-center' }, h('b', null, raw(center !== null && center !== undefined ? String(center) : (fmt ? fmt(base) : num(base)))), centerLabel ? h('span', null, centerLabel) : null));
     const legend = h('ul', { class: 'd-legend' });
     items.forEach(([label, v, onclick], i) => {
-      const pct = Math.round((100 * v) / (total || sum));
+      const pct = fmtPct(100 * v / base);
       legend.append(h('li', null, h(onclick ? 'button' : 'div', { class: 'd-row' + (onclick ? ' link' : ''), type: onclick ? 'button' : null, onclick: onclick || null },
-        h('i', { class: 'd-sw', style: `background:${segs[i].color}` }), h('span', { class: 'dl' }, label), h('span', { class: 'dv' }, raw((fmt ? fmt(v) : num(v)) + ' · ' + pct + '%')))));
+        h('i', { class: 'd-sw', style: `background:${segs[i].color}` }), h('span', { class: 'dl' }, label), h('span', { class: 'dv' }, raw((fmt ? fmt(v) : num(v)) + ' · ' + pct)))));
     });
     wrap.append(chart, legend);
     if (!J.RM) {
@@ -1169,7 +1250,7 @@
       h('span', { class: 'dot', 'aria-hidden': 'true' }), h('div', { class: 'ins-txt' }, typeof x.text === 'string' ? raw(x.text) : x.text),
       x.act ? h('button', { class: 'btn sm link-btn', type: 'button', onclick: x.act[1] }, x.act[0]) : null))));
   }
-  const vizCard = (title, content, note) => h('div', { class: 'viz-card' }, h('h3', null, title), content, note ? h('p', { class: 'muted small viz-note' }, note) : null);
+  const vizCard = (title, content, note) => h('div', { class: 'viz-card' }, h('h3', null, title), h('div', { class: 'viz-body' }, content, note ? h('p', { class: 'muted small viz-note' }, note) : null));
   const vizRow = (...cards) => h('div', { class: 'viz-row' }, ...cards.filter(Boolean));
   /** Counts of a field (arrays count each element) → [[label, n]] sorted, top `limit` + "Outros". */
   function countBy(rows, fn, { limit = 8, empty = 'Não informado', label = null } = {}) {
@@ -1211,8 +1292,8 @@
   const NAV = [
     { label: 'Geral', items: [['overview', 'Visão geral', 'overview', 'home'], ['activity', 'Meus relatórios', null, 'clock']] },
     { label: 'Identidade', items: [['identity', 'Usuários', 'identity', 'users'], ['inactive', 'Contas inativas', 'identity', 'clock'], ['mfa', 'MFA', 'mfa', 'key'], ['guests', 'Convidados', 'guests', 'guest'], ['privileged', 'Acessos privilegiados', 'privileged', 'crown'], ['risk', 'Risco', 'risk', 'pulse']] },
-    { label: 'Dispositivos & apps', items: [['devices', 'Dispositivos', 'devices', 'device'], ['apps', 'Aplicativos', 'apps', 'box']] },
-    { label: 'Segurança', items: [['ca', 'Acesso Condicional', 'ca', 'shield'], ['authpolicies', 'Políticas de autenticação', 'authpolicies', 'lock'], ['appsec', 'Apps & consentimentos', 'appsec', 'plug'], ['securescore', 'Secure Score', 'securescore', 'gauge']] },
+    { label: 'Dispositivos & apps', items: [['devices', 'Dispositivos', 'devices', 'device'], ['apps', 'Apps descobertos', 'apps', 'box'], ['managed_apps', 'Apps gerenciados', 'managed_apps', 'box'], ['intune_assignments', 'Atribuições do catálogo', 'intune_assignments', 'users']] },
+    { label: 'Segurança', items: [['ca', 'Acesso Condicional', 'ca', 'shield'], ['authpolicies', 'Políticas de autenticação', 'authpolicies', 'lock'], ['appsec', 'Apps & consentimentos', 'appsec', 'plug'], ['securescore', 'Secure Score', 'securescore', 'gauge'], ['identityscore', 'Identity Score', 'identityscore', 'gauge']] },
     { label: 'Licenças & uso', items: [['licensing', 'Licenciamento', 'licensing', 'card'], ['usage', 'Uso do M365', 'usage', 'chart']] },
     { label: 'Exchange & arquivos', items: [['mailboxes', 'Caixas de correio', 'mailboxes', 'mail'], ['storage', 'OneDrive & SharePoint', 'storage', 'cloud']] },
     { label: 'Ações', items: [['sync', 'Ações em dispositivos', ['act_sync', 'devices'], 'bolt']] },
@@ -1317,6 +1398,7 @@
   };
 
   async function renderShell(reuse = false) {
+    App.detachMenu?.();
     if (!(reuse && App.me)) {
       root.innerHTML = '';
       root.className = 'j365tp app-root';
@@ -1343,13 +1425,14 @@
     const groups = NAV.map((g) => ({ label: g.label, items: g.items.filter(([, , req]) => !req || [].concat(req).every((x) => reports.includes(x))) })).filter((g) => g.items.length);
     const avail = groups.flatMap((g) => g.items.map(([id]) => id));
 
-    const side = h('aside', { class: 'sidebar', 'aria-label': 'Relatórios' }, h('div', { class: 'side-brand' }, logo('side-logo'), h('span', { class: 'brand-chip' }, raw('Tenant'))));
+    const closeMenu = h('button', { class: 'icon-btn drawer-close', type: 'button', 'aria-label': 'Fechar menu', title: 'Fechar menu', onclick: () => setMenu(false, true) }, raw('×'));
+    const side = h('aside', { class: 'sidebar', id: 'j365-report-sidebar', 'aria-label': 'Relatórios' }, h('div', { class: 'side-brand' }, logo('side-logo'), h('span', { class: 'brand-chip' }, raw('Tenant')), closeMenu));
     const navEl = h('nav', { class: 'side-nav' });
     for (const g of groups) {
       navEl.append(h('div', { class: 'side-group' }, g.label));
       for (const [id, label, req, ic] of g.items) {
         const locked = blocked.has(id) || [].concat(req || []).some((x) => blocked.has(x));
-        navEl.append(h('button', { class: 'side-link' + (locked ? ' locked' : ''), 'data-v': id, type: 'button', title: locked ? t('Permissão pendente de aprovação neste tenant') : null, onclick: () => { go(id); root.classList.remove('nav-open'); } }, icon(ic), h('span', null, label), locked ? icon('lock2', 'ico lockmark') : null));
+        navEl.append(h('button', { class: 'side-link' + (locked ? ' locked' : ''), 'data-v': id, type: 'button', title: locked ? t('Permissão pendente de aprovação neste tenant') : null, onclick: () => { go(id); if (narrow.matches) setMenu(false, true); } }, icon(ic), h('span', null, label), locked ? icon('lock2', 'ico lockmark') : null));
       }
     }
     const creator = window.J365Landing && window.J365Landing.creatorChip ? window.J365Landing.creatorChip('side-creator') : null;
@@ -1360,9 +1443,10 @@
       h('span', { class: 'side-ver' }, raw('v' + CFG.version))));
 
     const roleNames = (u.roles || []).map((r) => r.name).filter(Boolean);
+    const menuButton = h('button', { class: 'icon-btn menu-toggle', type: 'button', 'aria-controls': side.id, onclick: () => setMenu(side.hidden, true) }, icon('menu'), h('span', null, 'Menu'));
     const header = h('header', { class: 'app-header' },
       h('div', { class: 'tenant-block' },
-        h('button', { class: 'icon-btn menu-toggle', type: 'button', 'aria-label': 'Abrir menu', onclick: () => root.classList.toggle('nav-open') }, icon('menu')),
+        menuButton,
         h('div', { class: 'tenant-avatar', 'aria-hidden': 'true' }, raw(initials(ten.name || ten.domain))),
         h('div', { class: 'tenant-txt' }, h('div', { class: 'tenant-name' }, raw(ten.name || ten.domain || ten.id)), h('div', { class: 'tenant-meta' }, raw((ten.domain ? ten.domain + ' · ' : '') + ten.id)))),
       h('div', { class: 'head-tools' },
@@ -1413,8 +1497,56 @@
     const foot = h('footer', { class: 'app-foot' },
       h('span', null, t('Sessão expira em {s}', { s: fmtDate(App.me.session.expiresAt) })),
       h('span', null, h('a', { href: C.url || '#', target: '_blank', rel: 'noopener' }, 'Projeto criado por', ' ', raw(C.name || '')), raw(` · ${APP} v${CFG.version}`)));
+    const main = h('main', { class: 'app-main' }, header, banner, permBanner, content, foot);
     root.append(h('div', { class: 'app-bg', 'aria-hidden': 'true' }, h('i', { class: 'blob b1' }), h('i', { class: 'blob b2' })),
-      h('div', { class: 'app-shell' }, side, h('main', { class: 'app-main' }, header, banner, permBanner, content, foot), h('div', { class: 'scrim', onclick: () => root.classList.remove('nav-open') })));
+      h('div', { class: 'app-shell' }, side, main, h('div', { class: 'scrim', 'aria-hidden': 'true', onclick: () => setMenu(false, true) })));
+    const narrow = window.matchMedia('(max-width: 900px)');
+    const menuKey = () => 'j365.menu.' + (narrow.matches ? 'mobile' : 'desktop');
+    function setMenu(open, userAction = false) {
+      const drawer = narrow.matches && open;
+      side.hidden = !open;
+      main.inert = drawer;
+      root.classList.toggle('nav-open', drawer);
+      root.classList.toggle('nav-collapsed', !open && !narrow.matches);
+      if (drawer) {
+        side.setAttribute('role', 'dialog');
+        side.setAttribute('aria-modal', 'true');
+      } else {
+        side.removeAttribute('role');
+        side.removeAttribute('aria-modal');
+      }
+      const label = t(open ? 'Fechar menu' : 'Abrir menu');
+      menuButton.setAttribute('aria-label', label);
+      menuButton.setAttribute('aria-expanded', String(open));
+      menuButton.title = label;
+      if (userAction) {
+        try { localStorage.setItem(menuKey(), open ? 'open' : 'closed'); } catch (_) { /* storage disabled */ }
+      }
+      if (drawer) closeMenu.focus({ preventScroll: true });
+      else if (userAction || (!open && side.contains(document.activeElement))) menuButton.focus({ preventScroll: true });
+    }
+    const restoreMenu = () => {
+      let saved;
+      try { saved = localStorage.getItem(menuKey()); } catch (_) { /* use the viewport default */ }
+      setMenu(saved === 'open');
+    };
+    const menuKeys = (event) => {
+      if (!narrow.matches || side.hidden || document.querySelector('.dlg-bg')) return;
+      if (event.key === 'Escape') { event.preventDefault(); setMenu(false, true); }
+      if (event.key !== 'Tab') return;
+      const visible = [...side.querySelectorAll('button:not(:disabled), a[href]')].filter((el) => el.getClientRects().length);
+      const last = visible[visible.length - 1];
+      if (event.shiftKey && document.activeElement === closeMenu) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); closeMenu.focus(); }
+    };
+    narrow.addEventListener('change', restoreMenu);
+    document.addEventListener('keydown', menuKeys);
+    App.detachMenu = () => {
+      narrow.removeEventListener('change', restoreMenu);
+      document.removeEventListener('keydown', menuKeys);
+      App.detachMenu = null;
+    };
+    restoreMenu();
 
     const go = (v, keepScroll = false) => {
       if (!avail.includes(v)) v = 'overview';
@@ -1448,6 +1580,7 @@
   }
 
   function renderLanding(message) {
+    App.detachMenu?.();
     if (window.J365Landing) window.J365Landing.render(root, message);
   }
   document.addEventListener('j365:unauth', () => renderLanding(t('Sua sessão expirou. Entre novamente.')));
@@ -1844,7 +1977,7 @@
   /* Devices */
   const PLATFORM = { windows: 'Windows', windowsServer: 'Windows Server', macos: 'macOS', ios: 'iOS', ipados: 'iPadOS', android: 'Android', linux: 'Linux', chromeos: 'ChromeOS', other: 'Outros' };
   const SUPPORT = { supported: ['Suportado', 'ok'], ending: ['Termina em breve', 'warn'], entOnly: ['Só Enterprise/Education', 'warn'], unsupported: ['Fora de suporte', 'danger'], unknown: ['Não avaliado', ''] };
-  const COMPLIANCE = { compliant: ['Conforme', 'ok'], noncompliant: ['Não conforme', 'danger'], ingraceperiod: ['Em período de carência', 'warn'], unknown: ['Desconhecido', ''], configmanager: ['Configuration Manager', 'info'], conflict: ['Conflito', 'warn'], error: ['Erro', 'danger'] };
+  const COMPLIANCE = { compliant: ['Conforme', 'ok'], noncompliant: ['Não conforme', 'danger'], ingraceperiod: ['Em período de carência', 'warn'], unknown: ['Desconhecido', ''], configmanager: ['Configuration Manager', 'info'], conflict: ['Conflito', 'warn'], error: ['Erro', 'danger'], remediated: ['Corrigido', 'ok'], notapplicable: ['Não aplicável', ''], notassigned: ['Não atribuído', ''] };
   const OWNERSHIP = { company: 'Corporativo', personal: 'Pessoal', unknown: 'Desconhecido' };
   const ENROLL = {
     userEnrollment: 'Registro pelo usuário', deviceEnrollmentManager: 'Gerenciador de registro (DEM)', appleBulkWithUser: 'Apple ADE (com usuário)', appleBulkWithoutUser: 'Apple ADE (sem usuário)',
@@ -1858,6 +1991,28 @@
   const isoDay = fmtDay;
   const supportNote = (n) => (n && n.tpl ? t(n.tpl, { a: n.a ? isoDay(n.a) : '', b: n.b ? isoDay(n.b) : '', c: n.c ? isoDay(n.c) : '', os: n.os || '', min: n.min ?? '' }) : '');
   const compliance = (c) => COMPLIANCE[String(c || '').toLowerCase()] || (c ? [c, ''] : null);
+  const hasComplianceIssue = (r) => !!r.intuneId && ['noncompliant', 'error', 'conflict'].includes(String(r.compliance || '').toLowerCase());
+  function compliancePanel(params) {
+    const stateLabel = (state) => (compliance(state) || ['—'])[0];
+    return reportPanel('device_compliance', params, 'Motivos de não conformidade', (p) => DataTable({
+      name: 'device-compliance', sheet: 'Conformidade por política', rows: p.rows, emptyText: 'O Intune não retornou uma política ou configuração com falha para este dispositivo.',
+      columns: [
+        { key: 'policy', label: 'Política', wrap: true, render: (row) => raw(row.policy || '—') },
+        { key: 'policyState', label: 'Estado da política', render: (row) => stateLabel(row.policyState), export: (row) => stateLabel(row.policyState) },
+        { key: 'setting', label: 'Configuração', wrap: true, render: (row) => row.setting ? raw(row.setting) : t('Não detalhada pelo Intune') },
+        { key: 'state', label: 'Estado informado', render: (row) => badge(...(compliance(row.state) || ['—', ''])), export: (row) => stateLabel(row.state) },
+        { key: 'instance', label: 'Instância', wrap: true, render: (row) => raw(row.instance || '—') }, { key: 'description', label: 'Descrição do erro', wrap: true, render: (row) => raw(row.description || '—') }, { key: 'code', label: 'Código do erro' },
+      ],
+    }), { icon: 'shield', subtitle: 'Estados publicados pelo Intune para o dispositivo selecionado. Algumas políticas informam apenas o estado geral.' });
+  }
+  function complianceControl(r) {
+    if (!hasComplianceIssue(r)) return null;
+    if (!App.me.reports.includes('device_compliance')) return h('p', { class: 'muted small' }, 'Para consultar os motivos, o operador pode ativar Detalhes de conformidade do Intune nas configurações do WordPress.');
+    const host = h('div');
+    const button = h('button', { class: 'btn sm', type: 'button', onclick: () => host.replaceChildren(compliancePanel({ id: r.intuneId, name: r.name || '' })) }, 'Consultar políticas e configurações');
+    host.append(button);
+    return host;
+  }
   function deviceDetail(r) {
     const sup = SUPPORT[r.support] || SUPPORT.unknown;
     // Remote actions for this device (only those Microsoft documents for its platform).
@@ -1865,7 +2020,7 @@
     const can = Actions.can('intune');
     const bar = acts.length ? h('div', { class: 'detail-actions' }, h('span', { class: 'seg-label' }, 'Ações remotas'),
       ...acts.map(([k, A]) => h('button', { type: 'button', class: 'btn sm' + (A.tone === 'warn' ? ' warn' : ''), disabled: !can, title: can ? t(A.desc) : t('Requer {s} (atribuição ativa).', { s: (Actions.info('intune').roles || []).join(', ') }), onclick: () => deviceActionDialog([r], k) }, icon(A.icon), A.label))) : null;
-    modal(r.name || r.serial || r.id, h('div', null, bar, h('div', { class: 'grid2' },
+    modal(r.name || r.serial || r.id, h('div', null, complianceControl(r), bar, h('div', { class: 'grid2' },
       h('div', null, h('h3', null, 'Sistema'), kv([['Plataforma', PLATFORM[r.platform] || r.platform], ['Sistema operacional', raw(r.os || '—')], ['Versão', raw(r.osVersion || '—')], ['Release', raw(r.osRelease || '—')], ['Suporte', badge(sup[0], sup[1])], ['Fim do suporte', isoDay(r.supportEnd)], ['Observação', supportNote(r.supportNote) || '—']])),
       h('div', null, h('h3', null, 'Identidade (Entra ID)'), kv([['Classificação', r.classification], ['Ativo', yesNo(r.enabled)], ['Sincronizado do AD', yesNo(r.syncedFromAd)], ['Propriedade', OWNERSHIP[String(r.ownership || '').toLowerCase()] || r.ownership], ['Registrado em', fmtDate(r.registered)], ['Último login (Entra)', fmtDate(r.lastSignInEntra)], ['Dias sem login', r.daysSinceEntra ?? '—'], ['Device ID', raw(r.deviceId || '—')]])),
       h('div', null, h('h3', null, 'Gerenciamento (Intune)'), kv([['No Intune', yesNo(r.inIntune)], ['Conformidade', r.compliance ? badge(...compliance(r.compliance)) : '—'], ['Último sync', fmtDate(r.lastSyncIntune)], ['Dias sem sync', r.daysSinceSync ?? '—'], ['Usuário primário', raw(r.primaryUser || '—')], ['Agente de gerenciamento', AGENT[r.managementAgent] || r.managementAgent], ['Tipo de registro', ENROLL[r.enrollmentType] || r.enrollmentType], ['Registrado no Intune', fmtDate(r.enrolled)], ['Categoria', r.category]])),
@@ -1882,26 +2037,40 @@
       out.append(reportPanel('devices', { stale_days: +days.value }, 'Inventário de dispositivos (Entra ID + Intune)', (p) => {
         const s = p.summary, box = h('div');
         const by = s.bySupport || {};
+        const intune = !!p._meta.intune;
+        const syncStale = (r) => r.inIntune === true && (r.daysSinceSync == null || r.daysSinceSync > p._meta.stale_days);
+        // Results from a job started before 1.4 can still be opened in this tab.
+        for (const row of p.rows) {
+          if (row.osBuild === undefined) {
+            const version = String(row.osVersion || '');
+            row.osBuild = ['windows', 'windowsServer'].includes(row.platform) ? (version.match(/^\s*\d+\.\d+\.(\d+)(?:\.|$)/)?.[1] || version.match(/\((\d+)\)/)?.[1] || '') : '';
+          }
+        }
         const isWin10 = (r) => /^Windows 10 /.test(r.osRelease || '') && !/LTS[BC]/.test(r.osRelease || '');
         const cols = [
           { key: 'name', label: 'Nome' },
+          { key: 'compliance', label: 'Conformidade', render: (r) => {
+            const value = r.compliance ? badge(...compliance(r.compliance)) : '—';
+            if (!hasComplianceIssue(r) || !App.me.reports.includes('device_compliance')) return value;
+            return h('span', null, value, ' ', h('button', { class: 'btn sm', type: 'button', onkeydown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); modal(r.name || r.intuneId, compliancePanel({ id: r.intuneId, name: r.name || '' })); } }, 'Ver motivos'));
+          }, export: (r) => r.compliance ? compliance(r.compliance)[0] : '' },
           { key: 'platform', label: 'Plataforma', render: (r) => PLATFORM[r.platform] || r.platform, export: (r) => PLATFORM[r.platform] || r.platform },
-          { key: 'osRelease', label: 'Versão', render: (r) => raw(r.osRelease || r.osVersion || '—'), export: (r) => r.osRelease || r.osVersion, sortValue: (r) => (r.osRelease || '') + ' ' + (r.osVersion || '') },
+          { key: 'osRelease', label: 'Release', render: (r) => raw(r.osRelease || '—') },
+          { key: 'osVersion', label: 'Versão do SO' }, { key: 'osBuild', label: 'Build do Windows', sortValue: (r) => r.osBuild ? Number(r.osBuild) : null },
           { key: 'support', label: 'Suporte', render: (r) => { const x = SUPPORT[r.support] || SUPPORT.unknown; const b = badge(x[0], x[1]); const n = supportNote(r.supportNote); if (n) b.title = n; return b; }, export: (r) => (SUPPORT[r.support] || SUPPORT.unknown)[0], sortValue: (r) => ({ unsupported: 0, ending: 1, entOnly: 2, supported: 3, unknown: 4 }[r.support] ?? 5) },
           { key: 'supportEnd', label: 'Fim do suporte', render: (r) => isoDay(r.supportEnd), export: (r) => r.supportEnd },
           { key: 'supportNote', label: 'Observação de suporte', exportOnly: true, export: (r) => supportNote(r.supportNote) },
           { key: 'classification', label: 'Classificação', render: (r) => badge(r.classification.split(' (')[0], { 'Híbrido': 'info', 'Cloud-only': 'ok', 'Registrado': 'warn' }[r.classification.split(' (')[0]] || '') },
-          { key: 'stale', label: 'Obsoleto', render: (r) => r.stale ? badge('Sim', 'danger') : badge('Não', 'ok') },
+          { key: 'stale', label: 'Obsoleto', render: (r) => bool(r.stale, false) },
           { key: 'lastSignInEntra', label: 'Último login (Entra)', render: (r) => fmtDate(r.lastSignInEntra), export: (r) => r.lastSignInEntra }, { key: 'daysSinceEntra', label: 'Dias (Entra)' },
           { key: 'inIntune', label: 'Intune', render: (r) => bool(r.inIntune) },
-          { key: 'compliance', label: 'Conformidade', render: (r) => r.compliance ? badge(...compliance(r.compliance)) : '—', export: (r) => (r.compliance ? compliance(r.compliance)[0] : '') },
           { key: 'lastSyncIntune', label: 'Último sync (Intune)', render: (r) => fmtDate(r.lastSyncIntune), export: (r) => r.lastSyncIntune }, { key: 'primaryUser', label: 'Usuário primário' },
           { key: 'encrypted', label: 'Criptografado', render: (r) => r.encrypted === null ? '—' : bool(r.encrypted) },
           { key: 'ownership', label: 'Propriedade', render: (r) => OWNERSHIP[String(r.ownership || '').toLowerCase()] || r.ownership || '—', export: (r) => OWNERSHIP[String(r.ownership || '').toLowerCase()] || r.ownership },
           { key: 'enabled', label: 'Ativo', render: (r) => bool(r.enabled) }, { key: 'autopilot', label: 'Autopilot', render: (r) => r.autopilot === null ? '—' : bool(r.autopilot) },
           { key: 'manufacturer', label: 'Fabricante' }, { key: 'model', label: 'Modelo' }, { key: 'serial', label: 'Serial' },
           { key: 'registered', label: 'Registrado em', render: (r) => fmtDay(r.registered), export: (r) => r.registered },
-          { key: 'os', label: 'SO (informado)', exportOnly: true }, { key: 'osVersion', label: 'Versão do SO', exportOnly: true }, { key: 'deviceId', label: 'Device ID', exportOnly: true },
+          { key: 'os', label: 'SO (informado)', exportOnly: true }, { key: 'deviceId', label: 'Device ID', exportOnly: true },
           { key: 'trustType', label: 'Tipo de ingresso (trustType)', exportOnly: true }, { key: 'joinType', label: 'Tipo de ingresso (Intune)', exportOnly: true },
           { key: 'syncedFromAd', label: 'Sincronizado do AD', exportOnly: true, export: (r) => (r.syncedFromAd === null || r.syncedFromAd === undefined ? null : !!r.syncedFromAd) },
           { key: 'compliantEntra', label: 'Conforme (Entra)', exportOnly: true, export: (r) => (r.compliantEntra === null || r.compliantEntra === undefined ? null : !!r.compliantEntra) },
@@ -1916,38 +2085,41 @@
           { key: 'category', label: 'Categoria', exportOnly: true }, { key: 'intuneId', label: 'ID no Intune', exportOnly: true },
         ];
         const table = DataTable({ rows: p.rows, columns: cols, name: 'dispositivos', onRowClick: deviceDetail,
+          facets: [{ key: 'osRelease', label: 'Release' }, { key: 'osVersion', label: 'Versão do SO' }, { key: 'osBuild', label: 'Build do Windows' }],
           segments: platformSegments(App.params.devPlatform || 'all', (id) => { App.params.devPlatform = id; }),
           filters: [
             { id: 'unsup', label: 'Fora de suporte', fn: (r) => r.support === 'unsupported' }, { id: 'ending', label: 'Suporte terminando (≤ 90 dias)', fn: (r) => r.support === 'ending' }, { id: 'entonly', label: 'Só Enterprise/Education', fn: (r) => r.support === 'entOnly' }, { id: 'win10', label: 'Windows 10', fn: isWin10 },
             { id: 'stale', label: 'Obsoletos', fn: (r) => r.stale }, { id: 'hybrid', label: 'Híbridos', fn: (r) => r.trustType === 'ServerAd' }, { id: 'cloud', label: 'Cloud-only (Entra joined)', fn: (r) => r.trustType === 'AzureAd' }, { id: 'reg', label: 'Registrados (BYOD)', fn: (r) => r.trustType === 'Workplace' },
-            { id: 'intune', label: 'No Intune', fn: (r) => r.inIntune }, { id: 'nointune', label: 'Fora do Intune', fn: (r) => !r.inIntune }, { id: 'noncomp', label: 'Não conformes', fn: (r) => String(r.compliance).toLowerCase() === 'noncompliant' }, { id: 'unenc', label: 'Sem criptografia', fn: (r) => r.encrypted === false },
-            { id: 'personal', label: 'Pessoais', fn: (r) => String(r.ownership).toLowerCase() === 'personal' }, { id: 'disabled', label: 'Desabilitados', fn: (r) => !r.enabled }, { id: 'orphan', label: 'Somente Intune (órfãos)', fn: (r) => String(r.id).startsWith('intune:') },
+            intune && { id: 'intune', label: 'No Intune', fn: (r) => r.inIntune === true }, intune && { id: 'nointune', label: 'Fora do Intune', fn: (r) => r.inIntune === false }, intune && { id: 'noncomp', label: 'Não conformes', fn: (r) => String(r.compliance).toLowerCase() === 'noncompliant' }, intune && { id: 'unenc', label: 'Sem criptografia', fn: (r) => r.encrypted === false }, intune && { id: 'nosync', label: 'Sem sync Intune', fn: syncStale },
+            { id: 'personal', label: 'Pessoais', fn: (r) => String(r.ownership).toLowerCase() === 'personal' }, { id: 'disabled', label: 'Desabilitados', fn: (r) => r.enabled === false }, intune && { id: 'orphan', label: 'Somente Intune (órfãos)', fn: (r) => String(r.id).startsWith('intune:') },
           ] });
         box.append(kpis([
-          { label: 'Total (Entra)', value: s.total }, { label: 'Fora de suporte', value: by.unsupported || 0, cls: by.unsupported ? 'danger' : 'ok', onclick: () => table.setFilter('unsup') },
+          { label: 'Dispositivos no inventário', value: p.rows.length }, { label: 'Total (Entra)', value: s.total }, { label: 'Fora de suporte', value: by.unsupported || 0, cls: by.unsupported ? 'danger' : 'ok', onclick: () => table.setFilter('unsup') },
           { label: 'Suporte terminando', value: by.ending || 0, cls: by.ending ? 'warn' : '', onclick: () => table.setFilter('ending'), title: 'Fim do suporte em até 90 dias.' },
           { label: 'Só Enterprise/Education', value: by.entOnly || 0, cls: by.entOnly ? 'warn' : '', onclick: () => table.setFilter('entonly'), title: 'Versões do Windows 11 que só seguem com suporte nas edições Enterprise/Education.' },
           { label: 'Windows 10', value: p.rows.filter(isWin10).length, cls: p.rows.some(isWin10) ? 'danger' : 'ok', onclick: () => table.setFilter('win10') },
           { label: 'Híbridos', value: s.hybrid, onclick: () => table.setFilter('hybrid') }, { label: 'Cloud-only', value: s.entraJoined, cls: 'ok', onclick: () => table.setFilter('cloud') }, { label: 'Registrados', value: s.registered, onclick: () => table.setFilter('reg') },
-          { label: t('Obsoletos (> {n} dias)', { n: p._meta.stale_days }), value: s.stale, cls: 'danger', onclick: () => table.setFilter('stale') }, { label: 'No Intune', value: s.intuneManaged, onclick: () => table.setFilter('intune') }, { label: 'Fora do Intune', value: s.notInIntune, cls: 'warn', onclick: () => table.setFilter('nointune') },
-          { label: 'Não conformes', value: s.nonCompliant, cls: 'danger', onclick: () => table.setFilter('noncomp') }, { label: 'Sem criptografia', value: s.unencrypted ?? 0, cls: s.unencrypted ? 'warn' : '', onclick: () => table.setFilter('unenc') }, { label: 'Sem sync Intune', value: s.intuneStale, cls: 'warn' }, { label: 'Órfãos Intune', value: s.intuneOrphans, onclick: () => table.setFilter('orphan') },
+          { label: t('Obsoletos (> {n} dias)', { n: p._meta.stale_days }), value: s.stale, cls: s.stale ? 'danger' : '', onclick: s.stale == null ? null : () => table.setFilter('stale') },
+          ...[['No Intune', s.intuneManaged, 'intune', ''], ['Fora do Intune', s.notInIntune, 'nointune', 'warn'], ['Não conformes', s.nonCompliant, 'noncomp', 'danger'], ['Sem criptografia', s.unencrypted, 'unenc', 'warn'], ['Sem sync Intune', s.intuneStale, 'nosync', 'warn'], ['Órfãos Intune', s.intuneOrphans, 'orphan', '']].map(([label, value, id, cls]) => ({ label, value: intune ? value : null, cls: intune && value ? cls : '', onclick: intune ? () => table.setFilter(id) : null })),
         ]));
         const plat = Object.entries(s.byPlatform || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => [PLATFORM[k] || k, v, () => table.setSegment(k === 'ipados' ? 'ios' : k)]);
         const rel = Object.entries(s.byRelease || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => [raw(k), v, () => table.setMatch('osRelease', k, k)]);
         const supp = [['Suportado', by.supported || 0, null, 'ok'], ['Termina em breve', by.ending || 0, () => table.setFilter('ending'), 'warn'], ['Só Enterprise/Education', by.entOnly || 0, () => table.setFilter('entonly'), '#e8b04b'], ['Fora de suporte', by.unsupported || 0, () => table.setFilter('unsup'), 'danger'], ['Não avaliado', by.unknown || 0, null, 'muted']];
         box.append(vizRow(
-          vizCard('Por plataforma', donut(plat, { total: s.total + (s.intuneOrphans || 0), centerLabel: t('dispositivos'), key: 'platform' })),
+          vizCard('Por plataforma', donut(plat, { total: p.rows.length, centerLabel: t('dispositivos'), key: 'platform' })),
           vizCard('Suporte do sistema', donut(supp, { centerLabel: t('dispositivos'), key: 'support' })),
-          vizCard('Por versão do sistema', barList(rel, s.total + (s.intuneOrphans || 0), { limit: 10, key: 'osRelease' }))));
-        if (by.unsupported || by.ending || by.entOnly) box.append(h('div', { class: 'alert warn' }, 'Sistemas fora de suporte não recebem correções de segurança. Priorize a atualização (Windows 11 25H2/26H2, iOS/iPadOS 18+, macOS 15+, Android 10+) e use políticas de conformidade do Intune com versão mínima de SO + Acesso Condicional exigindo dispositivo conforme.'));
+          vizCard('Por versão do sistema', barList(rel, p.rows.length, { limit: 10, key: 'osRelease' }))));
+        if (by.unsupported || by.ending || by.entOnly) box.append(h('div', { class: 'alert warn' }, 'Confira a edição e a data de fim de suporte antes de planejar as atualizações.'));
+        if (p._meta.previousEnrollments) box.append(h('p', { class: 'muted small' }, t('Registros de inscrição anteriores agrupados pelo ID do dispositivo no Entra: {n}. O inventário usa a inscrição com sincronização mais recente.', { n: num(p._meta.previousEnrollments) })));
         box.append(table);
         box.append(h('p', { class: 'muted small foot-note' }, t('Ciclo de vida conforme Microsoft (Windows release health, Lifecycle) e sistemas suportados pelo Intune, verificado em {s}. Edição do Windows nem sempre é informada: quando ausente, vale a data Enterprise/Education.', { s: isoDay(p._meta.lifecycleAsOf || '2026-11-01') })));
         return box;
-      }, { subtitle: 'Híbrido = trustType ServerAd (Hybrid Entra joined); Cloud-only = AzureAd (Entra joined); Registrado = Workplace. Join Entra↔Intune por deviceId/azureADDeviceId. Clique no dispositivo para detalhes.', controls: form, ring: (p) => {
+      }, { subtitle: 'Consulte os dispositivos do Entra ID e do Intune. Filtre por versão ou build e abra um dispositivo para ver suas políticas de conformidade.', controls: form, ring: (p) => {
         const mdm = p.rows.filter((r) => r.inIntune);
         if (mdm.length) { const ok = mdm.filter((r) => String(r.compliance).toLowerCase() === 'compliant').length, pc = pctOf(ok, mdm.length); return { pct: pc, label: 'dos dispositivos do Intune em conformidade', caption: t('{a} de {b} dispositivos', { a: num(ok), b: num(mdm.length) }), tone: toneFor(pc, 90, 75) }; }
-        const all = p.rows.length, bad = p.rows.filter((r) => r.support === 'unsupported').length, pc = pctOf(all - bad, all);
-        return all ? { pct: pc, label: 'com sistema operacional suportado', caption: t('{n} fora de suporte', { n: num(bad) }), tone: toneFor(pc, 95, 85) } : null;
+        const assessed = p.rows.filter((r) => ['supported', 'ending', 'unsupported'].includes(r.support));
+        const bad = assessed.filter((r) => r.support === 'unsupported').length, pc = pctOf(assessed.length - bad, assessed.length);
+        return assessed.length ? { pct: pc, label: 'com suporte entre os dispositivos avaliados', caption: t('{a} de {b} dispositivos', { a: num(assessed.length - bad), b: num(assessed.length) }), tone: toneFor(pc, 95, 85) } : null;
       } }));
     }
     draw();
@@ -1959,39 +2131,50 @@
     const s = p.summary, box = h('div');
     const cols = [
       { key: 'name', label: 'Aplicativo' }, { key: 'publisher', label: 'Publisher' }, { key: 'platform', label: 'Plataforma' },
-      { key: 'approved', label: 'Homologado', render: (r) => r.approved ? badge('Sim', 'ok') : badge('Não', 'danger') }, { key: 'approvedBy', label: 'Critério', wrap: true },
+      { key: 'approved', label: 'Homologado', render: (r) => r.approvalKnown === false ? badge('Indeterminado', 'warn') : r.approved ? badge('Sim', 'ok') : badge('Não', 'danger'), export: (r) => r.approvalKnown === false ? t('Indeterminado') : r.approved }, { key: 'approvedBy', label: 'Critério', wrap: true },
       { key: 'deviceCount', label: 'Dispositivos', render: (r) => num(r.deviceCount) }, { key: 'versionCount', label: 'Versões' }, { key: 'latestVersion', label: 'Versão mais recente' },
       { key: 'versions', label: 'Versões (dispositivos)', render: (r) => list(r.versions.map((v) => `${v.version} (${v.devices})`), 3), export: (r) => r.versions.map((v) => `${v.version} (${v.devices})`), wrap: true },
     ];
     const table = DataTable({ rows: p.rows, columns: cols, name: 'aplicativos', onRowClick: (r) => appDetail(r), filters: [
-      { id: 'notapproved', label: 'Não homologados', fn: (r) => !r.approved }, { id: 'approved', label: 'Homologados', fn: (r) => r.approved }, { id: 'multi', label: 'Múltiplas versões', fn: (r) => r.versionCount > 1 },
+      { id: 'notapproved', label: 'Não homologados', fn: (r) => !r.approved && r.approvalKnown !== false }, { id: 'approved', label: 'Homologados', fn: (r) => r.approved }, { id: 'multi', label: 'Múltiplas versões', fn: (r) => r.versionCount > 1 },
+      s.unknown ? { id: 'unknown', label: 'Indeterminado', fn: (r) => r.approvalKnown === false } : null,
       { id: 'win', label: 'Windows', fn: (r) => r.platform === 'windows' }, { id: 'mac', label: 'macOS', fn: (r) => r.platform === 'macOS' }, { id: 'ios', label: 'iOS', fn: (r) => r.platform === 'iOS' }, { id: 'android', label: 'Android', fn: (r) => /android/i.test(r.platform) },
     ] });
     box.append(kpis([
       { label: 'Aplicativos únicos', value: s.apps }, { label: 'Entradas (app+versão)', value: s.entries }, { label: 'Homologados', value: s.approved, cls: 'ok', onclick: () => table.setFilter('approved') }, { label: 'Não homologados', value: s.notApproved, cls: 'danger', onclick: () => table.setFilter('notapproved') },
       { label: 'Via Intune', value: s.approvedIntune }, { label: 'Via allowlist', value: s.approvedAllowlist }, { label: 'Via publisher', value: s.approvedPublisher }, { label: 'Múltiplas versões', value: s.multiVersion, cls: 'warn', onclick: () => table.setFilter('multi') }, { label: 'Catálogo Intune', value: s.intuneCatalog },
     ]));
-    box.append(h('div', { class: 'alert' }, 'Critérios de homologação: (1) aplicativo implantado pelo Intune (mobileApps) ', p.settings.auto_approve_intune_apps ? badge('ativo', 'ok') : badge('desativado', 'warn'), ' · (2) regra na allowlist do tenant · (3) publisher Microsoft ', p.settings.trust_microsoft_publisher ? badge('ativo', 'ok') : badge('desativado', 'warn'), '. Ajuste em Configurações.'));
+    box.append(h('div', { class: 'alert' }, 'Homologação por nome no catálogo publicado do Intune ', p.settings.auto_approve_intune_apps ? badge('ativo', 'ok') : badge('desativado', 'warn'), ' · (2) regra na allowlist do tenant · (3) publisher Microsoft ', p.settings.trust_microsoft_publisher ? badge('ativo', 'ok') : badge('desativado', 'warn'), '. Ajuste em Configurações.'));
     if (p.rows.length) {
       box.append(vizRow(
         vizCard('Homologação', donut([['Homologados', s.approved, () => table.setFilter('approved'), 'ok'], ['Não homologados', s.notApproved, () => table.setFilter('notapproved'), 'danger']], { centerLabel: t('aplicativos'), key: 'approved' })),
         vizCard('Por plataforma', donut(countBy(p.rows, (r) => r.platform, { limit: 6 }).map(([l, v]) => [l, v]), { centerLabel: t('aplicativos'), key: 'platform' })),
-        vizCard('Mais instalados', barList([...p.rows].sort((a, b) => b.deviceCount - a.deviceCount).slice(0, 8).map((r) => [raw(r.name), r.deviceCount, () => appDetail(r)]), 0))));
+        vizCard('Mais instalados', barList(p.rows.slice(0, 8).map((r) => [raw(r.name), r.deviceCount, () => appDetail(r)]), 0))));
     }
     box.append(table);
     return box;
-  }, { subtitle: 'Fonte: /deviceManagement/detectedApps (inventário coletado pelo Intune) + /deviceManagement/mobileApps. Clique no app para ver versões e dispositivos.', ring: (p) => {
+  }, { subtitle: 'Software detectado nos dispositivos. Selecione um aplicativo para consultar suas versões e instalações.', ring: (p) => {
     const s = p.summary, pc = pctOf(s.approved, s.apps);
-    return s.apps ? { pct: pc, label: 'dos aplicativos homologados', caption: t('{n} sem homologação', { n: num(s.notApproved) }), tone: toneFor(pc, 90, 70) } : null;
+    return s.apps && !s.unknown ? { pct: pc, label: 'dos aplicativos homologados', caption: t('{n} sem homologação', { n: num(s.notApproved) }), tone: toneFor(pc, 90, 70) } : null;
   } });
 
   function appDetail(r) {
     const body = h('div');
-    body.append(kv([['Publisher', r.publisher], ['Plataforma', r.platform], ['Homologado', r.approved ? `Sim — ${r.approvedBy}` : 'Não'], ['Dispositivos (soma das versões)', num(r.deviceCount)]]));
+    body.append(kv([['Publisher', r.publisher], ['Plataforma', r.platform], ['Homologado', r.approvalKnown === false ? t('Indeterminado') : r.approved ? t('Sim') + ' — ' + t(r.approvedBy) : t('Não')], ['Dispositivos (soma das versões)', num(r.deviceCount)]]));
     body.append(h('h3', { style: 'margin-top:14px' }, 'Versões'));
-    body.append(h('div', { class: 'tablewrap', style: 'max-height:240px' }, h('table', { style: 'min-width:0' }, h('thead', null, h('tr', null, h('th', null, 'Versão'), h('th', null, 'Dispositivos'), h('th', null, 'Ação'))), h('tbody', null, ...r.versions.map((v) => h('tr', null, h('td', null, v.version), h('td', null, num(v.devices)), h('td', null, h('button', { class: 'btn sm', onclick: () => loadDevices([v.id], `${r.name} ${v.version}`) }, 'Dispositivos'))))))));
+    body.append(DataTable({ rows: r.versions, name: 'app-versoes', sheet: 'Versões', pageSize: 10, compact: true, columns: [
+      { key: 'version', label: 'Versão' }, { key: 'devices', label: 'Dispositivos' },
+      { key: 'id', label: 'ID', exportOnly: true },
+      { key: 'detail', render: (v) => h('button', { type: 'button', class: 'btn sm', onclick: () => loadDevices([v.id], r.name + ' ' + v.version) }, 'Dispositivos') },
+    ] }));
+    const batches = [], versionIds = r.versions.map((v) => v.id);
+    for (let i = 0; i < versionIds.length; i += 50) {
+      const ids = versionIds.slice(i, i + 50);
+      const label = versionIds.length <= 50 ? t('Listar todos os dispositivos com este app') : t('Dispositivos das versões {a}–{b}', { a: i + 1, b: i + ids.length });
+      batches.push(h('button', { class: 'btn primary', type: 'button', onclick: () => loadDevices(ids, versionIds.length <= 50 ? r.name : r.name + ' · ' + label) }, raw(label)));
+    }
     const actions = h('div', { class: 'actions' },
-      h('button', { class: 'btn primary', onclick: () => loadDevices(r.ids, r.name) }, 'Listar todos os dispositivos com este app'),
+      ...batches,
       !r.approved && App.me.user?.can?.manageApps ? h('button', { class: 'btn', onclick: async () => { try { await api('allowlist', { method: 'POST', body: { app_name: r.name, publisher: '', platform: r.platform, match_type: 'exact', notes: 'Adicionado pelo relatório' } }); delete App.cache['apps{}']; m.remove(); App.go('apps'); } catch (e) { alert(e.message); } } }, 'Homologar (adicionar à allowlist)') : null
     );
     body.append(actions);
@@ -2017,6 +2200,68 @@
         { id: 'noncompliant', label: 'Não conformes', fn: (x) => cmp(x) === 'noncompliant' }, { id: 'compliant', label: 'Conformes', fn: (x) => cmp(x) === 'compliant' }, { id: 'personal', label: 'Pessoais', fn: (x) => String(x.ownership || '').toLowerCase() === 'personal' },
       ], name: `app-${label.replace(/[^a-z0-9]+/gi, '_')}`, sheet: 'Dispositivos com o app', pageSize: 25 }), { icon: 'device' });
   }
+
+  const APP_REPORT_TITLES = { app_assignments: 'Atribuições do aplicativo', app_failures: 'Dispositivos com falhas' };
+  const INTUNE_INTENTS = { required: 'Obrigatória', available: 'Disponível', availableWithoutEnrollment: 'Disponível sem registro', uninstall: 'Desinstalação' };
+  const INTUNE_TARGETS = {
+    groupAssignmentTarget: 'Grupo incluído', exclusionGroupAssignmentTarget: 'Grupo excluído', allLicensedUsersAssignmentTarget: 'Todos os usuários licenciados',
+    allDevicesAssignmentTarget: 'Todos os dispositivos', configurationManagerCollectionAssignmentTarget: 'Coleção do Configuration Manager',
+  };
+  const INTUNE_PUBLISHING = { published: 'Publicado', processing: 'Em processamento', notPublished: 'Não publicado' };
+
+  function managedAppPanel(type, params) {
+    const global = type === 'intune_assignments';
+    const assignments = global || type === 'app_assignments';
+    const title = global ? 'Atribuições do catálogo' : APP_REPORT_TITLES[type];
+    const coverage = { assignment: 'Atribuição confirmada', none: 'Sem atribuições', unavailable: 'Consulta incompleta' };
+    const label = (values, key) => t(values[key] || key || 'Indeterminado');
+    return reportPanel(type, params, title, (p) => {
+      const columns = assignments ? [
+        ...(global ? [{ key: 'appName', label: 'Aplicativo' }, { key: 'appId', label: 'ID do aplicativo' }, { key: 'coverage', label: 'Cobertura', value: (r) => label(coverage, r.coverage) }] : []),
+        { key: 'intent', label: 'Intenção', value: (r) => r.coverage === 'none' ? '—' : label(INTUNE_INTENTS, r.intent) },
+        { key: 'target', label: 'Alvo', value: (r) => r.coverage === 'none' ? '—' : label(INTUNE_TARGETS, r.target) },
+        { key: 'groupName', label: 'Nome do grupo', value: (r) => r.groupId && !r.groupName ? t('Nome indisponível') : r.groupName },
+        { key: 'groupId', label: 'ID do grupo' }, { key: 'collectionId', label: 'ID da coleção' },
+        { key: 'filterType', label: 'Modo do filtro', value: (r) => ({ include: t('Inclusão'), exclude: t('Exclusão'), none: '—' })[r.filterType] || r.filterType },
+        { key: 'filterId', label: 'ID do filtro' }, { key: 'id', label: 'ID da atribuição', exportOnly: true },
+      ] : [
+        { key: 'name', label: 'Dispositivo' }, { key: 'deviceId', label: 'ID do dispositivo' }, { key: 'user', label: 'Usuário' },
+        { key: 'status', label: 'Estado', value: (r) => t(r.status === 'failed' ? 'Falha na instalação' : 'Falha na desinstalação') },
+        { key: 'code', label: 'Código de erro' }, { key: 'detail', label: 'Detalhes' }, { key: 'version', label: 'Versão' },
+        { key: 'modified', label: 'Última atualização', render: (r) => fmtDate(r.modified) },
+      ];
+      return DataTable({ rows: p.rows, columns, name: global ? type : type + '-' + params.id, sheet: title, pageSize: 25,
+        emptyText: global ? 'Nenhum registro.' : assignments ? 'O Intune não retornou atribuições para este aplicativo.' : 'Nenhuma falha identificada nos registros retornados pelo Intune.',
+        filters: assignments ? [...Object.entries(INTUNE_INTENTS).map(([id, text]) => ({ id, label: text, fn: (r) => r.intent === id })),
+          ...(global ? ['none', 'unavailable'].map((id) => ({ id, label: coverage[id], fn: (r) => r.coverage === id })) : [])] : [],
+        facets: global ? [{ key: 'target', label: 'Alvo' }, { key: 'groupName', label: 'Nome do grupo' }] : [],
+      });
+    }, { icon: assignments ? 'users' : 'device', subtitle: global ? 'Consulte os aplicativos e seus destinos por intenção de implantação. Os grupos excluídos aparecem como alvos separados.' : params.name || params.id });
+  }
+
+  views.intune_assignments = () => managedAppPanel('intune_assignments', {});
+
+  views.managed_apps = () => reportPanel('managed_apps', {}, 'Apps gerenciados', (p) => {
+    const open = (type, r) => modal(r.name || r.id, managedAppPanel(type, { id: r.id, name: r.name.slice(0, 200) }));
+    const table = DataTable({ rows: p.rows, name: 'intune-apps', sheet: 'Apps gerenciados', columns: [
+      { key: 'name', label: 'Aplicativo', wrap: true }, { key: 'publisher', label: 'Publisher' },
+      { key: 'type', label: 'Tipo' }, { key: 'state', label: 'Publicação', value: (r) => t(INTUNE_PUBLISHING[r.state] || r.state || 'Indeterminado') },
+      { key: 'failedDevices', label: 'Dispositivos com falhas', value: (r) => r.failedDevices ?? t('Sem contagem') },
+      { key: 'modified', label: 'Última atualização', render: (r) => fmtDate(r.modified) },
+      { key: 'id', label: 'ID do aplicativo', exportOnly: true },
+      { key: 'details', render: (r) => h('div', { class: 'actions' },
+        h('button', { class: 'btn sm', type: 'button', onclick: () => open('app_assignments', r) }, 'Ver atribuições'),
+        h('button', { class: 'btn sm', type: 'button', onclick: () => open('app_failures', r) }, 'Ver falhas')) },
+    ], filters: [
+      { id: 'failed', label: 'Com falhas', fn: (r) => r.failedDevices > 0 },
+      { id: 'zero', label: 'Zero falhas', fn: (r) => r.failedDevices === 0 },
+      { id: 'unknown', label: 'Sem contagem', fn: (r) => r.failedDevices == null },
+    ] });
+    return h('div', null, kpis([
+      { label: 'Apps gerenciados', value: p.summary.apps }, { label: 'Apps com falhas confirmadas', value: p.summary.withFailures, onclick: () => table.setFilter('failed') },
+      { label: 'Apps sem contagem', value: p.summary.unknown, onclick: () => table.setFilter('unknown') },
+    ]), table);
+  }, { subtitle: 'Catálogo do Intune e contagens por aplicativo (Microsoft Graph beta). Atribuições e dispositivos são consultados ao abrir os detalhes.' });
 
   /* Conditional Access */
   views.ca = () => reportPanel('ca', {}, 'Políticas de Acesso Condicional', (p) => {
@@ -2172,7 +2417,7 @@
   views.guests = () => reportPanel('guests', {}, 'Colaboração externa (convidados)', (p) => {
     const s = p.summary, box = h('div');
     const table = DataTable({ rows: p.rows, name: 'convidados', onRowClick: (r) => modal(r.displayName || r.upn, kv([['UPN', r.upn], ['E-mail', r.mail], ['Domínio', r.domain], ['Estado', r.state], ['Ativo', yesNo(r.enabled)], ['Criado', fmtDate(r.created)], ['Último login', fmtDate(r.lastSignIn)], ['Dias sem login', r.daysSinceSignIn ?? 'nunca'], ['Empresa', r.company]])), columns: [
-      { key: 'displayName', label: 'Nome' }, { key: 'upn', label: 'UPN' }, { key: 'domain', label: 'Domínio' }, { key: 'state', label: 'Convite', render: (r) => badge(r.state || '—', r.pending ? 'warn' : 'ok') }, { key: 'enabled', label: 'Ativo', render: (r) => bool(r.enabled) }, { key: 'lastSignIn', label: 'Último login', render: (r) => fmtDate(r.lastSignIn), export: (r) => r.lastSignIn }, { key: 'daysSinceSignIn', label: 'Dias', render: (r) => r.daysSinceSignIn === null ? badge('nunca', 'danger') : r.daysSinceSignIn }, { key: 'stale', label: 'Obsoleto', render: (r) => r.stale ? badge('Sim', 'danger') : '—' }, { key: 'created', label: 'Criado', render: (r) => fmtDay(r.created), export: (r) => r.created },
+      { key: 'displayName', label: 'Nome' }, { key: 'upn', label: 'UPN' }, { key: 'domain', label: 'Domínio' }, { key: 'state', label: 'Convite', render: (r) => badge(r.state || '—', r.state === 'Accepted' ? 'ok' : r.pending ? 'warn' : '') }, { key: 'enabled', label: 'Ativo', render: (r) => bool(r.enabled) }, { key: 'lastSignIn', label: 'Último login', render: (r) => fmtDate(r.lastSignIn), export: (r) => r.lastSignIn }, { key: 'daysSinceSignIn', label: 'Dias', render: (r) => r.daysSinceSignIn === null ? badge('nunca', 'danger') : r.daysSinceSignIn }, { key: 'stale', label: 'Obsoleto', render: (r) => r.stale ? badge('Sim', 'danger') : '—' }, { key: 'created', label: 'Criado', render: (r) => fmtDay(r.created), export: (r) => r.created },
       { key: 'mail', label: 'E-mail', exportOnly: true }, { key: 'company', label: 'Empresa', exportOnly: true },
       { key: 'stateChanged', label: 'Convite atualizado em', exportOnly: true, export: (r) => r.stateChanged }, { key: 'id', label: 'Object ID', exportOnly: true },
     ], filters: [{ id: 'pending', label: 'Pendentes', fn: (r) => r.pending }, { id: 'stale', label: 'Obsoletos', fn: (r) => r.stale }, { id: 'disabled', label: 'Desabilitados', fn: (r) => !r.enabled }, { id: 'never', label: 'Nunca logaram', fn: (r) => !!p._meta.premium && r.daysSinceSignIn === null }] });
@@ -2182,13 +2427,13 @@
     if (!p._meta.premium) box.append(h('div', { class: 'alert warn' }, 'Sem Entra ID P1/P2 a Microsoft não informa o último login dos convidados: "Obsoletos" e "Nunca logaram" não são avaliados.'));
     if (s.total) {
       box.append(vizRow(
-        vizCard('Situação do convite', donut([['Aceitos', s.accepted, null, 'ok'], ['Pendentes', s.pending, () => table.setFilter('pending'), 'warn']], { centerLabel: t('convidados'), key: 'state' })),
+        vizCard('Situação do convite', donut([['Aceitos', s.accepted, null, 'ok'], ['Pendentes', s.pending, () => table.setFilter('pending'), 'warn']], { total: s.total, centerLabel: t('convidados'), key: 'state' })),
         vizCard('Por domínio de origem', barList(Object.entries(s.byDomain || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => [raw(k), v, () => table.setMatch('domain', k, k)]), s.total, { limit: 8, key: 'domain' }))));
     }
     box.append(table);
     return box;
   }, { subtitle: 'Fonte: /users (userType eq Guest). Revise convites pendentes antigos e convidados obsoletos.', ring: (p) => {
-    const s = p.summary, ok = p.rows.filter((r) => !r.pending && !r.stale && r.enabled).length, pc = pctOf(ok, s.total);
+    const s = p.summary, ok = p.rows.filter((r) => r.state === 'Accepted' && !r.stale && r.enabled).length, pc = pctOf(ok, s.total);
     return s.total ? { pct: pc, label: 'dos convidados ativos e com convite aceito', caption: p._meta.premium ? t('{n} obsoletos', { n: num(s.stale) }) : '', tone: toneFor(pc, 80, 60) } : null;
   } });
 
@@ -2277,7 +2522,7 @@
     box.append(kpis([
       { label: 'Usuários em risco', value: s.total, cls: s.total ? 'danger' : 'ok' }, { label: 'Alto', value: s.high, cls: 'danger' }, { label: 'Médio', value: s.medium, cls: 'warn' }, { label: 'Baixo', value: s.low }, { label: 'Comprometidos confirmados', value: s.confirmedCompromised, cls: 'danger' }, { label: 'Detecções (30 dias)', value: s.detections },
     ]));
-    if (s.total) box.append(vizRow(vizCard('Nível de risco', donut([['Alto', s.high, null, 'danger'], ['Médio', s.medium, null, 'warn'], ['Baixo', s.low, null, 'info']], { centerLabel: t('usuários'), key: 'level' }))));
+    if (s.total) box.append(vizRow(vizCard('Nível de risco', donut([['Alto', s.high, null, 'danger'], ['Médio', s.medium, null, 'warn'], ['Baixo', s.low, null, 'info']], { total: s.total, centerLabel: t('usuários'), key: 'level' }))));
     box.append(h('h3', null, 'Usuários em risco'));
     box.append(DataTable({ rows: p.rows, name: 'usuarios-risco', sheet: 'Risco · Usuários', columns: [
       { key: 'displayName', label: 'Usuário' }, { key: 'upn', label: 'UPN' }, { key: 'level', label: 'Nível', render: (r) => badge(r.level, { high: 'danger', medium: 'warn', low: 'info' }[r.level] || '') }, { key: 'state', label: 'Estado', render: (r) => badge(r.state, r.state === 'confirmedCompromised' ? 'danger' : 'warn') }, { key: 'detail', label: 'Detalhe' }, { key: 'updated', label: 'Atualizado', render: (r) => fmtDate(r.updated), export: (r) => r.updated },
@@ -2343,6 +2588,25 @@
   } });
 
   /* Secure Score */
+  function scoreHistory(days) {
+    const chart = h('div', { class: 'score-days' });
+    const items = [];
+    const dates = new Intl.DateTimeFormat(CFG.intl || 'pt-BR', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    for (const day of days.slice(-8)) {
+      const value = pctOf(day.current, day.max);
+      const date = new Date(day.date);
+      const label = Number.isFinite(date.getTime()) ? dates.format(date) : '—';
+      items.push([label, value == null ? null : Math.round(value * 10) / 10]);
+      const points = t('{a} de {b} pontos', { a: num(day.current), b: num(day.max) });
+      chart.append(h('div', { class: 'score-day', title: label + ' · ' + points },
+        h('strong', null, raw(fmtPct(value))),
+        h('span', { class: 'score-track', 'aria-hidden': 'true' }, value == null ? null : h('i', { style: 'height:' + Math.max(0, Math.min(value, 100)) + '%' })),
+        h('span', null, raw(label))));
+    }
+    BAR_DATA.set(chart, { items, total: null, opts: { kind: 'scoreHistory' } });
+    return vizCard('Evolução da pontuação', chart);
+  }
+
   views.securescore = () => reportPanel('securescore', {}, 'Microsoft Secure Score', (p) => {
     const s = p.summary, box = h('div');
     box.append(kpis([
@@ -2351,17 +2615,7 @@
       { label: 'Ganho possível', value: (p.rows || []).reduce((a, r) => a + (r.gap > 0 ? r.gap : 0), 0), cls: 'warn' },
     ]));
     box.append(h('p', { class: 'muted small' }, t('Medido em {s}.', { s: fmtDate(s.date) })));
-    if (p.trend && p.trend.length > 1) {
-      // Scale to the series range (not to max score) so small improvements remain visible.
-      const vals = p.trend.map((t) => t.current);
-      const lo = Math.min(...vals), hi = Math.max(...vals), span = Math.max(1, hi - lo);
-      const first = p.trend[0], last = p.trend[p.trend.length - 1];
-      box.append(h('div', { class: 'panel' },
-        h('h3', null, 'Tendência'),
-        h('div', { class: 'trend' }, ...p.trend.map((t) => h('div', { title: `${fmtDay(t.date)}: ${num(Math.round(t.current))} pontos`, style: `height:${Math.round(18 + 82 * ((t.current - lo) / span))}%` }))),
-        h('div', { class: 'trend-legend' }, h('span', null, `${fmtDay(first.date)} · ${num(Math.round(first.current))}`), h('span', null, `${fmtDay(last.date)} · ${num(Math.round(last.current))} (${last.current >= first.current ? '+' : ''}${num(Math.round(last.current - first.current))})`))
-      ));
-    }
+    if (p.trend?.length > 1) box.append(scoreHistory(p.trend));
     box.append(h('h3', { style: 'margin-top:8px' }, 'Controles (maior ganho primeiro)'));
     box.append(DataTable({ rows: p.rows, name: 'secure-score', onRowClick: (r) => modal(r.name, kv([['Categoria', r.category], ['Pontuação', `${r.score} / ${r.max}`], ['% implementado', r.implemented === null ? '—' : r.implemented + '%'], ['Estado', r.state], ['Impacto no usuário', r.userImpact], ['Remediação', r.remediation]])), columns: [
       { key: 'name', label: 'Controle', wrap: true }, { key: 'category', label: 'Categoria' }, { key: 'score', label: 'Pontos', render: (r) => `${num(r.score)}/${num(r.max)}`, export: (r) => r.score }, { key: 'max', label: 'Pontos máximos', exportOnly: true }, { key: 'implemented', label: '% impl.', render: (r) => r.implemented === null ? '—' : badge(r.implemented + '%', r.implemented >= 100 ? 'ok' : (r.implemented > 0 ? 'warn' : 'danger')) }, { key: 'gap', label: 'Ganho possível', render: (r) => r.gap > 0 ? badge('+' + num(r.gap), 'warn') : '—' }, { key: 'userImpact', label: 'Impacto' },
@@ -2372,6 +2626,35 @@
     const s = p.summary;
     return s.percent === null || s.percent === undefined ? null : { pct: s.percent, label: 'Microsoft Secure Score', caption: t('{a} de {b} pontos', { a: num(Math.round(s.current)), b: num(Math.round(s.max)) }), tone: toneFor(s.percent, 70, 50) };
   } });
+
+  views.identityscore = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p) => {
+    const s = p.summary;
+    const box = h('div');
+    const status = { active: 'Ativa', completedBySystem: 'Concluído pelo sistema', completedByUser: 'Concluído pelo usuário', dismissed: 'Descartada', postponed: 'Adiada', riskAccepted: 'Risco aceito', planned: 'Planejada', thirdParty: 'Resolvido por terceiro', alternateMitigation: 'Mitigação alternativa' };
+    const priority = { high: 'Alta', medium: 'Média', low: 'Baixa' };
+    if (s.percent == null) box.append(h('p', { class: 'alert warn' }, 'O Entra ainda não forneceu uma medição completa para este tenant.'));
+    box.append(kpis([
+      { label: 'Pontos', value: s.current }, { label: 'Pontuação máxima', value: s.max },
+      { label: 'Recomendações', value: p.rows.length }, { label: 'Medições', value: p.history.length },
+    ]));
+    if (s.date) box.append(h('p', { class: 'muted small' }, t('Medido em {s}.', { s: fmtDate(s.date) })));
+    if (p.history.length > 1) box.append(scoreHistory(p.history.slice(0, 8).reverse()));
+    box.append(h('h3', null, 'Recomendações de identidade'), DataTable({
+      rows: p.rows, name: 'identity-recommendations', sheet: 'Recomendações de identidade',
+      columns: [
+        { key: 'name', label: 'Recomendação', wrap: true }, { key: 'status', label: 'Estado', value: (r) => t(status[r.status] || r.status) },
+        { key: 'priority', label: 'Prioridade', value: (r) => t(priority[r.priority] || r.priority) }, { key: 'current', label: 'Pontos' }, { key: 'max', label: 'Pontos máximos' },
+        { key: 'gap', label: 'Ganho possível' }, { key: 'checked', label: 'Última avaliação', render: (r) => fmtDate(r.checked) },
+      ], filters: [{ id: 'active', label: 'Ativas', fn: (r) => r.status === 'active' }, { id: 'gap', label: 'Com ganho', fn: (r) => r.gap > 0 }],
+    }), h('h3', null, 'Histórico da pontuação'), DataTable({
+      rows: p.history, name: 'identity-score-history', sheet: 'Histórico da pontuação',
+      columns: [{ key: 'date', label: 'Data da medição', render: (r) => fmtDay(r.date.slice(0, 10)) },
+        { key: 'current', label: 'Pontos' }, { key: 'max', label: 'Pontuação máxima' },
+        { key: 'percent', label: 'Identity Score (%)', render: (r) => r.percent == null ? '—' : num(r.percent) + '%' }],
+    }));
+    return box;
+  }, { subtitle: 'Pontuação diária e recomendações de identidade fornecidas pelo Microsoft Entra (Graph beta).', ring: ({ summary: s }) =>
+    s.percent == null ? null : { pct: s.percent, label: 'Identity Score', caption: t('{a} de {b} pontos', { a: num(s.current), b: num(s.max) }), tone: toneFor(s.percent, 70, 50) } });
 
   /* M365 usage */
   views.usage = () => {
@@ -3001,8 +3284,8 @@
       const bands = [['Abaixo de 50%', 0, null, 'ok'], ['50% a 80%', 0, null, 'info'], ['80% a 90%', 0, () => table.setFilter('near'), 'warn'], ['90% ou mais', 0, () => table.setFilter('p90'), 'danger']];
       for (const r of rows) { const b = band(r); if (b !== null) bands[b][1]++; }
       box.append(vizRow(
-        vizCard('Uso da cota', donut(bands, { centerLabel: t('caixas') })),
-        vizCard('Arquivo morto', donut([['Com arquivo morto', s.withArchive ?? rows.filter((r) => r.hasArchive).length, () => table.setFilter('arch'), 'ok'], ['Sem arquivo morto', s.noArchive, () => table.setFilter('noarch'), 'muted']], { centerLabel: t('caixas'), key: 'hasArchive' })),
+        vizCard('Uso da cota', donut(bands, { total: rows.length, centerLabel: t('caixas') })),
+        vizCard('Arquivo morto', donut([['Com arquivo morto', s.withArchive ?? rows.filter((r) => r.hasArchive).length, () => table.setFilter('arch'), 'ok'], ['Sem arquivo morto', s.noArchive, () => table.setFilter('noarch'), 'muted']], { total: rows.length, centerLabel: t('caixas'), key: 'hasArchive' })),
         vizCard('Situação das cotas', barList(Object.entries(QUOTA).map(([k, [label]]) => [label, rows.filter((r) => r.quota === k).length, () => table.setFilter(k === 'ok' ? 'quotaok' : k === 'warning' ? 'warn' : 'full')]), rows.length))));
       box.append(vizRow(vizCard('Maiores caixas', barList([...rows].sort((a, b) => (b.used || 0) - (a.used || 0)).slice(0, 10).map((r) => [raw(hidden ? shortId(r.upn) : (r.displayName || r.upn)), r.used || 0, () => detail(r)]), 0, { fmt: bytes }))));
     }
@@ -3010,8 +3293,9 @@
     if (gate) box.append(h('div', { class: 'gate-foot' }, gate));
     return box;
   }, { subtitle: 'Compare o uso das caixas de correio, encontre caixas próximas da cota e confira quais têm arquivo morto.', ring: (p) => {
-    const s = p.summary || {}, ok = Math.max(0, (s.total || 0) - (s.near || 0)), pc = pctOf(ok, s.total);
-    return s.total ? { pct: pc, label: 'das caixas abaixo de 80% da cota', caption: t('{n} sem enviar e-mails', { n: num((s.sendBlocked || 0) + (s.blocked || 0)) }), tone: toneFor(pc, 95, 85) } : null;
+    const s = p.summary || {}, measured = p.rows.filter((r) => Number.isFinite(r.pct));
+    const pc = pctOf(measured.filter((r) => r.pct < 80).length, measured.length);
+    return measured.length ? { pct: pc, label: 'das caixas com cota medida abaixo de 80%', caption: t('{n} sem enviar e-mails', { n: num((s.sendBlocked || 0) + (s.blocked || 0)) }), tone: toneFor(pc, 95, 85) } : null;
   } });
 
   /* ------------------------------------------------------------ OneDrive & SharePoint */
@@ -3106,7 +3390,7 @@
     if (od.length || sp.length) {
       const odBands = [['Abaixo de 80%', od.filter((r) => r.pct !== null && r.pct < 80).length, null, 'ok'], ['80% a 90%', od.filter((r) => r.pct >= 80 && r.pct < 90).length, null, 'warn'], ['90% ou mais', od.filter((r) => r.pct >= 90).length, null, 'danger']];
       box.append(vizRow(
-        od.length ? vizCard('OneDrive: uso do limite', donut(odBands, { centerLabel: t('contas') })) : null,
+        od.length ? vizCard('OneDrive: uso do limite', donut(odBands, { total: od.length, centerLabel: t('contas') })) : null,
         vizCard('Armazenamento usado', donut([['OneDrive', s.odUsed || 0, () => show('onedrive')], ['SharePoint', s.spUsed || 0, () => show('sharepoint')]], { fmt: bytes, centerLabel: t('total') }))));
     }
     box.append(tabs, pane);
@@ -3133,7 +3417,7 @@
     } }, 'Salvar');
     box.append(h('div', { class: 'panel' }, h('h2', null, 'Homologação de aplicativos'),
       can.manageApps ? null : note('Somente Global Administrator, Intune Administrator ou Security Administrator (atribuição ativa) podem alterar as regras de homologação.'),
-      h('label', { class: 'check-row' }, auto, h('span', null, 'Considerar homologados os aplicativos implantados pelo Intune (catálogo mobileApps)')),
+      h('label', { class: 'check-row' }, auto, h('span', null, 'Homologar por correspondência de nome com um aplicativo publicado no catálogo do Intune')),
       h('label', { class: 'check-row' }, ms, h('span', null, 'Considerar homologados os aplicativos cujo publisher começa com "Microsoft"')),
       h('div', { class: 'actions' }, save), msg));
 
@@ -3241,7 +3525,9 @@
 
   /* Audit */
   function reportLabel(type) {
+    if (APP_REPORT_TITLES[type]) return t(APP_REPORT_TITLES[type]);
     if (type === 'app_devices') return t('Dispositivos com o app');
+    if (type === 'device_compliance') return t('Motivos de não conformidade');
     for (const group of NAV) {
       const item = group.items.find(([id]) => id === type);
       if (item) return t(item[1]);
@@ -3256,6 +3542,12 @@
       // The server sorts and bounds these IDs; an older tab entry may use the original order.
       App.cache[type + JSON.stringify(params)] = payload;
       modal(t('Dispositivos com o app'), appDevicesPanel(params.ids, params.name));
+    } else if (type === 'device_compliance') {
+      App.cache[type + JSON.stringify(params)] = payload;
+      modal(params.name || params.id, compliancePanel(params));
+    } else if (APP_REPORT_TITLES[type]) {
+      App.cache[type + JSON.stringify(params)] = payload;
+      modal(params.name || params.id, managedAppPanel(type, params));
     } else {
       if (type === 'usage') App.params.usagePeriod = params.period;
       if (type === 'devices') App.params.devStale = params.stale_days;
@@ -3281,13 +3573,13 @@
     const row = (title, detail, ...controls) => h('li', null,
       h('div', { class: 'job-info' }, h('strong', null, raw(title)), detail),
       h('div', { class: 'job-controls' }, ...controls));
-    const supported = (type) => App.me.reports.includes(type) && !type.startsWith('act_') && (type === 'app_devices' || typeof views[type] === 'function');
+    const supported = (type) => App.me.reports.includes(type) && !type.startsWith('act_') && (type === 'app_devices' || type === 'device_compliance' || APP_REPORT_TITLES[type] || typeof views[type] === 'function');
     function drawLocal() {
       const results = [...new Set(Object.values(App.cache))].filter((p) => supported(p?._meta?.report));
       results.sort((a, b) => String(b._meta.generated_at).localeCompare(String(a._meta.generated_at)));
       local.replaceChildren(...results.map((p) => {
         const m = p._meta, params = m.params || {};
-        const suffix = m.report === 'usage' ? params.period : m.report === 'app_devices' ? params.name : '';
+        const suffix = m.report === 'usage' ? params.period : m.report === 'app_devices' || m.report === 'device_compliance' || APP_REPORT_TITLES[m.report] ? params.name : '';
         const title = reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
         return row(title, h('small', null, raw(fmtDate(m.generated_at))), button('Abrir relatório', () => openSessionReport(p)));
       }));
@@ -3356,13 +3648,72 @@
 
   views.audit = () => {
     const P = App.me.privacy || CFG.privacy || {};
-    const box = h('div', { class: 'panel' }, h('h2', null, 'Auditoria do tenant'), h('p', { class: 'muted small' }, t('Logins, consentimentos, relatórios executados e alterações de configuração (últimos 200 eventos). Registro pseudonimizado — sem nomes, e-mails ou IP completo — mantido por {n} dias.', { n: P.auditDays || 30 })));
+    const box = h('div', { class: 'panel' }, h('h2', null, 'Auditoria do tenant'), h('p', { class: 'muted small' }, t('Eventos deste portal, guardados por {n} dias. Filtre todo o período e carregue eventos anteriores para ampliar a pesquisa ou exportação.', { n: P.auditDays || 30 })));
     const ACTOR = { you: ['Você', 'info'], other: ['Outro usuário (pseudônimo)', ''], system: ['Sistema', 'ok'] };
-    const out = h('div', null, skeleton(4));
-    box.append(out);
-    api('audit', { timeout: REPORT_REQUEST_MS }).then((r) => { out.innerHTML = ''; out.append(DataTable({ rows: r.rows, name: 'auditoria', columns: [
-      { key: 'ts', label: 'Quando', render: (x) => fmtDate(x.ts + 'Z'), export: (x) => x.ts }, { key: 'action', label: 'Ação' }, { key: 'actor', label: 'Ator', render: (x) => badge(...(ACTOR[x.actor] || [x.actor || '—'])), export: (x) => x.actor }, { key: 'details', label: 'Detalhes', render: (x) => x.details ? JSON.stringify(x.details).slice(0, 200) : '—', export: (x) => JSON.stringify(x.details || {}), wrap: true },
-    ] })); }).catch((e) => { out.innerHTML = ''; out.append(h('div', { class: 'alert danger' }, e.message)); });
+    const actions = { report_done: 'Relatório concluído', report_start: 'Relatório iniciado', report_error: 'Falha no relatório',
+      login_success: 'Login concluído', login_error: 'Falha no login', consent_error: 'Falha no consentimento',
+      tenant_settings: 'Configurações do tenant', report_discard: 'Relatório descartado' };
+    const keys = { report: 'Relatório', rows: 'Linhas', error: 'Erro', status: 'Estado', reason: 'Motivo', roles: 'Funções', cap: 'Operação' };
+    const summarize = (details) => Object.entries(details || {}).map(([k, v]) => {
+      const val = typeof v === 'object' && v !== null ? (Array.isArray(v) ? v.join(', ') : JSON.stringify(v)) : String(v ?? '—');
+      return t(keys[k] || k) + ' · ' + (k === 'report' ? t(SHEET_NAMES[val] || val) : val);
+    }).join('  /  ');
+    const actor = h('select', { class: 'j365-input' }, h('option', { value: '' }, 'Todos'), ...Object.entries(ACTOR).map(([value, [label]]) => h('option', { value }, label)));
+    const action = h('select', { class: 'j365-input' }, h('option', { value: '' }, 'Todas'));
+    const from = h('input', { class: 'j365-input', type: 'date' }), to = h('input', { class: 'j365-input', type: 'date' });
+    const field = (label, control) => h('label', null, h('span', null, label), control);
+    const feedback = h('div', { role: 'status', 'aria-live': 'polite', class: 'muted small' });
+    const apply = h('button', { type: 'submit', class: 'btn sm primary' }, 'Aplicar');
+    const form = h('form', { class: 'audit-filters', onsubmit: (e) => { e.preventDefault(); load(false); } },
+      field('A partir de', from), field('Até', to), field('Ação', action), field('Ator', actor), apply);
+    const out = h('div'), rows = [];
+    const more = h('button', { type: 'button', class: 'btn sm', hidden: true, onclick: () => load(true) }, 'Carregar eventos anteriores');
+    let table, cursor, query = {};
+    const midnight = (day, next) => {
+      if (!day) return '';
+      const date = new Date(day + 'T00:00:00');
+      if (next) date.setDate(date.getDate() + 1);
+      return Math.floor(date.getTime() / 1000);
+    };
+    async function load(append) {
+      if (apply.disabled) return;
+      if (!append && from.value && to.value && from.value > to.value) {
+        feedback.textContent = t('A data final deve ser igual ou posterior à inicial.');
+        return;
+      }
+      const filters = append ? { ...query, cursor } : { action: action.value, actor: actor.value, after: midnight(from.value, false), until: midnight(to.value, true) };
+      apply.disabled = more.disabled = true;
+      feedback.textContent = t('Carregando eventos…');
+      try {
+        const page = await api('audit', { query: filters, timeout: REPORT_REQUEST_MS });
+        if (!append) {
+          query = filters;
+          rows.length = 0;
+          action.replaceChildren(h('option', { value: '' }, 'Todas'), ...(page.actions || []).map((id) => h('option', { value: id }, actions[id] || id)));
+          action.value = query.action;
+        }
+        rows.push(...page.rows.map((r) => ({ ...r, event: t(actions[r.action] || r.action), description: summarize(r.details), actorLabel: t(ACTOR[r.actor]?.[0] || r.actor) })));
+        if (append && table) table.redraw();
+        else {
+          table = DataTable({ rows, name: 'auditoria', columns: [
+            { key: 'ts', label: 'Quando', render: (r) => fmtDate(r.ts.replace(' ', 'T') + 'Z'), export: (r) => r.ts.replace(' ', 'T') + 'Z' },
+            { key: 'event', label: 'Ação' }, { key: 'action', label: 'Código do evento', exportOnly: true },
+            { key: 'actorLabel', label: 'Ator', render: (r) => badge(r.actorLabel, ACTOR[r.actor]?.[1]) },
+            { key: 'description', label: 'Detalhes', wrap: true },
+          ] });
+          out.replaceChildren(table);
+        }
+        cursor = page.nextCursor;
+        more.hidden = !cursor;
+        feedback.textContent = rows.length === 1 ? t('1 evento carregado.') : t('{n} eventos carregados.', { n: num(rows.length) });
+      } catch (error) {
+        feedback.textContent = error.message;
+      } finally {
+        apply.disabled = more.disabled = false;
+      }
+    }
+    box.append(form, feedback, out, more);
+    load(false);
     return box;
   };
 

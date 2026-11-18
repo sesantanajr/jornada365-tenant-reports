@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.3.0
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,21 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.4.0 =
+English
+
+* Inspect Intune application assignments, failure counts and affected devices, and open policy details for a noncompliant device. Filter the device inventory by OS release and build.
+* Identity Score shows the dated Microsoft Entra score and recommendations. This optional module requires DirectoryRecommendations.Read.All and uses Microsoft Graph beta.
+* Filter the portal audit by date, actor and action, load earlier events and export the selection.
+* Collapse or expand the navigation, reach the last columns of wide reports, and compare charts using consistent percentages.
+
+Português do Brasil
+
+* Consulte atribuições de aplicativos, falhas e dispositivos afetados no Intune. Abra os detalhes de um dispositivo não conforme e filtre o inventário por versão e build do sistema.
+* O Identity Score reúne a pontuação por data e as recomendações do Microsoft Entra. O módulo opcional usa DirectoryRecommendations.Read.All e o Microsoft Graph beta.
+* Filtre a auditoria do portal por data, ator e ação, carregue eventos anteriores e exporte a seleção.
+* Recolha ou expanda a navegação, acesse as últimas colunas de relatórios largos e compare gráficos com percentuais consistentes.
+
 = 1.3.0 =
 English
 

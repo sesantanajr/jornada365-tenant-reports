@@ -1,14 +1,14 @@
 # Repository artwork
 
-The cover adapts the cloud outline, circuit lines and blue palette of Jornada 365 for Tenant Reports. It was created with ImageGen from the previous cover and the logo displayed on the Jornada 365 home page. The group report screenshots show the same fictional organization in English and Brazilian Portuguese. [Jornada 365](https://jornada365.cloud/) · [Brand reference](https://jornada365.cloud/wp-content/uploads/2024/10/Logotipo-Jornada-365-Home-4.png)
+The cover pairs the Jornada 365 wordmark with a glass data sculpture in the brand’s blue palette. It was designed with the built-in ImageGen tool. Both portal screenshots use the same fictional tenant. [Jornada 365](https://jornada365.cloud/) · [Brand reference](https://jornada365.cloud/wp-content/uploads/2024/10/Logotipo-Jornada-365-Home-4.png)
 
 ## Imagens do repositório
 
-A capa adapta a nuvem, os traços de circuito e a paleta azul da Jornada 365 para o Tenant Reports. Foi criada com o ImageGen usando a capa anterior e o logotipo exibido na página inicial da Jornada 365. As capturas do relatório de grupos mostram a mesma organização fictícia em inglês e português brasileiro. [Jornada 365](https://jornada365.cloud/)
+A capa combina a marca Jornada 365 com uma composição de vidro na paleta azul do projeto. Foi criada com o ImageGen. As duas capturas do portal usam o mesmo tenant fictício. [Jornada 365](https://jornada365.cloud/)
 
 <details>
 <summary>ImageGen prompt</summary>
 
-Redesign the GitHub cover in image 1 to match the official Jornada 365 site identity in image 2. Very wide 2.6:1 landscape banner. Clean white background, generous margins. Place the supplied full-color official cloud-and-circuit wordmark from image 2 intact in the upper left, including its small tagline “INOVE, CONECTE-SE, EVOLUA”. Directly beneath, typeset the project title “Tenant Reports” in a large bold modern dark navy sans serif. On the right, create a crisp editorial illustration of a report page with a blue bar chart, small line chart, and cyan circuit traces terminating in small hollow circles that echo the logo. Restrained flat design, a subtle pale-blue shadow for dimension. Use the logo's turquoise #4dd5f5 and deep Azure #0065a8. Keep the identity mark and title distinct and legible at GitHub README width. Only the supplied logo text and “Tenant Reports” should appear. No dark background, slogans beyond the original official mark, device renders, frames, artificial interface text, badges or version numbers.
+Design an art-directed ultra-wide 2.6:1 GitHub masthead for the open-source Microsoft 365 reporting product. Reference 1 is the official Jornada 365 brand lockup, reproduce faithfully including its slogan and colors in a small elegant mark on upper left. Reference 2 is the former banner being completely redesigned. Create an editorial product identity on a soft pearl white ground. Generous whitespace. Title exactly 'Tenant Reports' left-aligned, two lines if helpful, beautifully kerned medium-weight modern Swiss grotesk in deep midnight blue. Beneath it one secondary line exactly 'Microsoft 365 · Entra ID · Intune'. On the right, an architectural studio photograph of sculptural sheets of translucent azure and cobalt glass, rising in measured increments like data series, thin highlight edges and physically accurate shadows on a pale surface. Crisp alignment, graceful hierarchy, optimistic and calm, comfortable margins. The data sculpture reaches the right edge. No paper or document icon, no fake interface, no badges, no extra text.
 
 </details>

@@ -1,6 +1,15 @@
 # Desempenho e implantação
 
-O [Tenant Jornada365](https://tenant.jornada365.cloud/) é uma solução open source para relatórios e operações delegadas de Microsoft 365 no WordPress. Este documento registra os ajustes da versão 1.2.2 e como verificar o comportamento em uma instalação própria.
+O Tenant Jornada365 é um portal de código aberto para relatórios de Microsoft 365 no WordPress. O inventário e os relatórios do Intune usam etapas curtas, compatíveis com hospedagem compartilhada. [Portal gratuito](https://tenant.jornada365.cloud/)
+
+## Consultas ao Intune na versão 1.4
+
+- **Apps descobertos** agrupa o inventário a cada página. A consulta adicional ao catálogo de aplicativos publicados ocorre quando a homologação automática pelo Intune está ativa.
+- **Apps gerenciados** combina o catálogo e o relatório agregado de falhas. Abra um aplicativo para consultar os dispositivos afetados e o código informado pelo Intune. Uma contagem ausente aparece como indisponível.
+- **Atribuições do catálogo** consulta os aplicativos em lotes. Use os filtros de intenção para localizar instalações obrigatórias, instalações opcionais e desinstalações. A lista distingue grupos incluídos, excluídos e alvos que abrangem todo o tenant.
+- **Dispositivos** carrega os detalhes de política quando você seleciona um dispositivo com problema de conformidade. Assim, abrir o inventário dispensa uma consulta de políticas para cada dispositivo.
+
+Na validação local com 2.400 versões distribuídas por 100 aplicativos fictícios, as linhas brutas da coleta anterior ocupavam 443.001 bytes em JSON. O estado completo da coleta agrupada ocupou 198.627 bytes, uma redução de 55,2%. Com a homologação automática pelo Intune desabilitada, a consulta ao catálogo foi dispensada. O tempo em um tenant real depende do volume de dados, do tempo de resposta do Graph e dos intervalos de espera indicados pela Microsoft. [Relatórios do Intune](https://learn.microsoft.com/intune/device-management/reports/ref-graph-available-reports) · [Limites do Microsoft Graph](https://learn.microsoft.com/graph/throttling)
 
 ## O que causava a espera
 

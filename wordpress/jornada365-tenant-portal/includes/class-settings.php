@@ -91,6 +91,12 @@ final class Settings {
 	 * consent screen and the App Registration script request only what is enabled.
 	 */
 	public const MODULES = [
+		'device_compliance' => [
+			'label'       => 'Detalhes de conformidade do Intune',
+			'permissions' => [ 'DeviceManagementConfiguration.Read.All' ],
+			'reports'     => [ 'device_compliance' ],
+			'note'        => 'Consulta sob demanda das políticas e configurações com falha em um dispositivo.',
+		],
 		'privileged' => [
 			'label'       => 'Identidade privilegiada & risco',
 			'permissions' => [ 'RoleManagement.Read.All', 'IdentityRiskyUser.Read.All', 'IdentityRiskEvent.Read.All' ],
@@ -108,6 +114,12 @@ final class Settings {
 			'permissions' => [ 'SecurityEvents.Read.All' ],
 			'reports'     => [ 'securescore' ],
 			'note'        => 'Microsoft Secure Score, tendência e controles pendentes.',
+		],
+		'identityscore' => [
+			'label'       => 'Identity Score (Microsoft Entra)',
+			'permissions' => [ 'DirectoryRecommendations.Read.All' ],
+			'reports'     => [ 'identityscore' ],
+			'note'        => 'Histórico de pontuação e recomendações de identidade do Microsoft Entra (Microsoft Graph beta).',
 		],
 		'usage'      => [
 			'label'       => 'Uso, caixas de correio e armazenamento (M365)',
@@ -129,16 +141,18 @@ final class Settings {
 
 	/** Reports (or features) that stop working when an application permission is missing. */
 	public const PERMISSION_REPORTS = [
+		'DeviceManagementConfiguration.Read.All' => [ 'device_compliance' ],
 		'Directory.Read.All'                      => [ 'overview', 'identity', 'groups', 'licensing', 'guests', 'domains' ],
 		'AuditLog.Read.All'                       => [ 'inactive', 'mfa' ],
 		'Policy.Read.All'                         => [ 'ca', 'authpolicies' ],
 		'DeviceManagementManagedDevices.Read.All' => [ 'apps', 'app_devices' ],
-		'DeviceManagementApps.Read.All'           => [],
+		'DeviceManagementApps.Read.All'           => [ 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures' ],
 		'RoleManagement.Read.All'                 => [ 'privileged' ],
 		'IdentityRiskyUser.Read.All'              => [ 'risk' ],
 		'IdentityRiskEvent.Read.All'              => [],
 		'Application.Read.All'                    => [ 'appsec' ],
 		'SecurityEvents.Read.All'                 => [ 'securescore' ],
+		'DirectoryRecommendations.Read.All'       => [ 'identityscore' ],
 		'Reports.Read.All'                        => [ 'usage', 'mailboxes', 'storage' ],
 	];
 
@@ -163,7 +177,7 @@ final class Settings {
 	}
 
 	/** Reports available with the base permissions (always on). */
-	public const BASE_REPORTS = [ 'overview', 'identity', 'mfa', 'devices', 'apps', 'app_devices', 'ca', 'groups', 'licensing', 'guests', 'domains', 'authpolicies' ];
+	public const BASE_REPORTS = [ 'overview', 'identity', 'mfa', 'devices', 'apps', 'app_devices', 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures', 'ca', 'groups', 'licensing', 'guests', 'domains', 'authpolicies' ];
 
 	public static function enabled_modules(): array {
 		$m = self::get( 'enabled_modules', array_keys( self::MODULES ) );
@@ -196,16 +210,18 @@ final class Settings {
 
 	/** Why each permission is requested (shown on the public sign-in screen and consent pages). */
 	public const PERMISSION_WHY = [
+		'DeviceManagementConfiguration.Read.All' => 'Estados de políticas e configurações de conformidade do Intune',
 		'Directory.Read.All'                      => 'Usuários, grupos, dispositivos, licenças, domínios, funções e consentimentos do diretório',
 		'AuditLog.Read.All'                       => 'Último login das contas (inatividade) e registro de métodos de MFA',
 		'Policy.Read.All'                         => 'Acesso Condicional, Security Defaults e políticas de autenticação',
 		'DeviceManagementManagedDevices.Read.All' => 'Dispositivos do Intune, conformidade e inventário de aplicativos instalados',
-		'DeviceManagementApps.Read.All'           => 'Aplicativos implantados pelo Intune (critério de homologação)',
+		'DeviceManagementApps.Read.All'           => 'Catálogo, atribuições e falhas de instalação de aplicativos do Intune',
 		'RoleManagement.Read.All'                 => 'Atribuições de funções administrativas e PIM',
 		'IdentityRiskyUser.Read.All'              => 'Usuários de risco (Identity Protection)',
 		'IdentityRiskEvent.Read.All'              => 'Detecções de risco (Identity Protection)',
 		'Application.Read.All'                    => 'Aplicativos, service principals e validade de segredos/certificados',
 		'SecurityEvents.Read.All'                 => 'Microsoft Secure Score e controles de segurança',
+		'DirectoryRecommendations.Read.All'       => 'Ler a pontuação e as recomendações de identidade do tenant no Microsoft Entra',
 		'Reports.Read.All'                        => 'Relatórios de uso e adoção, caixas de correio, OneDrive e SharePoint (tamanho e cotas)',
 		'DeviceManagementManagedDevices.PrivilegedOperations.All' => 'Delegada: ações remotas do Intune (sincronizar, reiniciar, verificação e atualização do Microsoft Defender), executadas com a sua conta e o seu RBAC do Intune',
 		'Exchange.Manage'                         => 'Delegada: ativar ou desativar o arquivo morto, expansão automática e processamento de caixas (Exchange Online), com a sua conta e o seu RBAC do Exchange',

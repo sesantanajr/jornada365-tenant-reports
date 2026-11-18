@@ -491,19 +491,24 @@ final class Rest_Api {
 		return new WP_REST_Response( [ 'cleared' => true, 'serverStorage' => false ] );
 	}
 
-	public function audit(): WP_REST_Response {
-		$s    = $this->session();
-		$me   = Privacy::uid( $s['upn'] );
-		$rows = Audit::recent( 200, $s['tenant_id'] );
-		$out  = [];
-		foreach ( $rows as $r ) {
-			$out[] = [
-				'ts'      => $r['ts'],
-				'action'  => $r['action'],
-				'actor'   => hash_equals( (string) $r['actor'], $me ) ? 'you' : ( str_starts_with( (string) $r['actor'], 'h:' ) ? 'other' : 'system' ),
-				'details' => json_decode( (string) $r['details'], true ),
-			];
+	public function audit( WP_REST_Request $request ) {
+		$s = $this->session();
+		$filters = [];
+		foreach ( [ 'after', 'until', 'cursor' ] as $key ) {
+			$value = $request->get_param( $key ) ?? '0';
+			if ( ! is_scalar( $value ) || ! ctype_digit( (string) $value ) || strlen( (string) $value ) > ( 'cursor' === $key ? 18 : 10 ) ) {
+				return new WP_Error( 'invalid_filter', 'Filtro de auditoria inválido.', [ 'status' => 400 ] );
+			}
+			$filters[ $key ] = (int) $value;
 		}
-		return new WP_REST_Response( [ 'rows' => $out, 'retentionDays' => Audit::retention_days() ] );
+		$filters['actor'] = $request->get_param( 'actor' ) ?? '';
+		$filters['action'] = $request->get_param( 'action' ) ?? '';
+		if ( ! in_array( $filters['actor'], [ '', 'you', 'other', 'system' ], true ) ||
+			! is_string( $filters['action'] ) || ! preg_match( '/^[a-z0-9_]{0,60}$/D', $filters['action'] ) ||
+			( $filters['until'] && $filters['after'] >= $filters['until'] ) ) {
+			return new WP_Error( 'invalid_filter', 'Filtro de auditoria inválido.', [ 'status' => 400 ] );
+		}
+		$page = Audit::for_tenant( $s['tenant_id'], Privacy::uid( $s['upn'] ), $filters );
+		return new WP_REST_Response( $page + [ 'retentionDays' => Audit::retention_days() ] );
 	}
 }

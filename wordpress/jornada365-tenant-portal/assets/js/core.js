@@ -252,7 +252,15 @@
       }
     }
     signal?.throwIfAborted();
-    const res = await fetch(CFG.restUrl + path, {
+    let url = CFG.restUrl + path;
+    if (opts.query) {
+      const target = new URL(url, location.href);
+      for (const [key, value] of Object.entries(opts.query)) {
+        if (value != null && value !== '') target.searchParams.set(key, String(value));
+      }
+      url = target.href;
+    }
+    const res = await fetch(url, {
       method: opts.method || 'GET',
       credentials: 'same-origin',
       headers,
