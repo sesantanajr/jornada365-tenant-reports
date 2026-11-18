@@ -1,0 +1,20 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: find wordpress tests -name '*.php' -print0 | xargs -0 -r -n 1 php -l
+      - run: find wordpress tests \( -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -r -n 1 node --check
+      - run: php tests/jwt-issuer.php
+      - run: php tests/company-login.php
+      - run: php tests/report-graph.php
+      - run: node tests/csv-export.cjs
+      - run: node tests/report-ui.cjs
+      - run: python3 scripts/package.py

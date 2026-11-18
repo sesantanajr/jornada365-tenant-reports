@@ -1,0 +1,10 @@
+dist/
+.env
+.env.*
+*.zip
+*.pem
+*.key
+*.pfx
+*.p12
+*.log
+.DS_Store
