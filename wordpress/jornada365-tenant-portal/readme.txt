@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -27,6 +27,21 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.7.0 =
+English
+
+* Explore device experience scores from Microsoft Intune Endpoint Analytics. Review available measurements and open individual devices for details.
+* Identity Score opens on a 24-month calendar, with exact points, source coverage and visible gaps. Combine earlier tenant archives or enable daily WP-Cron collection on an authorized multi-tenant installation.
+* Find reports by name or section in the sidebar. Updated report headers, charts and responsive typography improve readability across screen sizes.
+* The public sign-in page opens directly on the form. Switching email addresses restores the sign-in action.
+
+Português do Brasil
+
+* Consulte a experiência dos dispositivos no Microsoft Intune Endpoint Analytics e abra os detalhes das medições disponíveis por dispositivo.
+* O Identity Score abre em 24 meses e mostra pontos, fontes e lacunas. É possível combinar arquivos anteriores do tenant ou ativar a coleta diária por WP-Cron em uma instalação multitenant autorizada.
+* Localize relatórios pelo nome ou pela seção no menu. Cabeçalhos, gráficos e indicadores se adaptam à largura da tela.
+* A página pública abre diretamente no formulário. Trocar de e-mail volta a habilitar o botão de entrada.
+
 = 1.6.0 =
 English
 

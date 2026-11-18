@@ -9,11 +9,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /** The Entra recommendations API supplies the tenant-specific denominator for each date. */
 final class Identity_Score extends Report_Base {
+	public const HISTORY_PATH = '/beta/directory/recommendations/tenantSecureScores';
 
 	public function step( array $state, array $params, float $deadline ): array {
 		if ( 0 === $state['phase'] ) {
 			try {
-				$done = $this->fetch_collection( $state, 'history', '/beta/directory/recommendations/tenantSecureScores', $deadline, [], self::score_day( ... ) );
+				$done = $this->fetch_collection( $state, 'history', self::HISTORY_PATH, $deadline, [], self::score_day( ... ) );
 			} catch ( Graph_Exception $error ) {
 				if ( ! $error->is_forbidden() ) {
 					throw $error;
@@ -48,7 +49,7 @@ final class Identity_Score extends Report_Base {
 		return [ 'state' => $state, 'progress' => $done ? 2 : 1, 'total' => 2, 'done' => $done, 'message' => 'Consultando recomendações de identidade…' ];
 	}
 
-	private static function score_day( array $day ): array {
+	public static function score_day( array $day ): array {
 		$current = is_numeric( $day['tenantScore'] ?? null ) ? (float) $day['tenantScore'] : null;
 		$max     = is_numeric( $day['tenantMaxScore'] ?? null ) ? (float) $day['tenantMaxScore'] : null;
 		return [
@@ -59,10 +60,10 @@ final class Identity_Score extends Report_Base {
 		];
 	}
 
-	public function finalize( array $state, array $params ): array {
+	public static function normalized_history( array $observations ): array {
 		// Normalize offsets before ordering. API rows occasionally arrive across UTC day/month boundaries.
 		$history = [];
-		foreach ( $state['history'] ?? [] as $day ) {
+		foreach ( $observations as $day ) {
 			$date = (string) ( $day['date'] ?? '' );
 			if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/D', $date ) ) {
 				continue;
@@ -81,6 +82,11 @@ final class Identity_Score extends Report_Base {
 			$history[] = self::score_day( [ 'createDateTime' => $day['date'], 'tenantScore' => $day['current'], 'tenantMaxScore' => $day['max'] ] );
 		}
 		usort( $history, static fn( $a, $b ) => strcmp( $b['date'], $a['date'] ) );
+		return $history;
+	}
+
+	public function finalize( array $state, array $params ): array {
+		$history = self::normalized_history( $state['history'] ?? [] );
 		$latest = [ 'date' => '', 'current' => null, 'max' => null, 'percent' => null ];
 		foreach ( $history as $day ) {
 			if ( null !== $day['percent'] ) {

@@ -3,7 +3,7 @@
   'use strict';
   const J = window.J365;
   if (!J) return;
-  const { CFG, t, h, raw, svg, logo, cloudSvg, MS_LOGO, wpApi, copyText, reveal, spotlight, countUp, magnet, toast, dialog, themeToggle, langSwitch, RM } = J;
+  const { CFG, t, h, raw, svg, logo, cloudSvg, MS_LOGO, wpApi, copyText, toast, dialog, themeToggle, langSwitch } = J;
   const APP = CFG.appName || 'Tenant Jornada365';
   const ASSETS = CFG.assetsUrl || '';
   const CREATOR = CFG.creator || { name: "Sérgio Sant'Ana Júnior", url: 'https://www.linkedin.com/in/sergiosantanacloud/', photo: '' };
@@ -55,26 +55,21 @@
     { icon: 'lock_closed', title: 'Políticas de autenticação', text: 'Security Defaults, legacy auth, SSPR e métodos habilitados.', tag: 'Tenant' },
     { icon: 'globe_shield', title: 'Domínios', text: 'Domínios verificados, federados e padrão.', tag: 'Tenant' },
   ];
-  /* Hero orbit: official Microsoft Fluent UI System Icons (MIT), one per capability. Captions name the
-     capability and the service in plain text — no product logos. */
-  const ORBITS = [
-    { r: 30, dur: 64, items: [['people_team', 'Identidades', 'Entra ID'], ['shield_checkmark', 'Acesso Condicional', 'Entra ID'], ['phone_laptop', 'Dispositivos', 'Intune'], ['mail', 'Caixas de correio', 'Exchange Online'], ['cloud', 'Arquivos', 'OneDrive']] },
-    { r: 45, dur: 104, rev: true, items: [['person_key', 'MFA', 'Entra ID'], ['lock_shield', 'Acessos privilegiados', 'PIM'], ['arrow_sync', 'Sincronização', 'Intune'], ['gauge', 'Secure Score', 'Defender'], ['chat_multiple', 'Colaboração', 'Teams'], ['document_folder', 'Sites', 'SharePoint'], ['coin_multiple', 'Licenças', 'Microsoft 365'], ['apps', 'Aplicativos', 'Intune']] },
-  ];
-  const SERVICES = ['Entra ID', 'Intune', 'Exchange Online', 'SharePoint', 'OneDrive', 'Teams', 'Defender'];
+  const SOURCE = 'https://github.com/sesantanajr/jornada365-tenant-reports';
+  const BRAND = CFG.brand || APP;
+  let entryFocus;
+  let headerObserver;
 
   /* ------------------------------------------------------------ pieces */
   function signInButton(size = '') {
-    const b = h('a', { class: 'ms-btn ' + size, href: CFG.loginUrl || '#', role: 'button' },
-      h('span', { class: 'ms-mark', html: MS_LOGO }), h('span', { class: 'ms-label' }, raw(loginLabel())), ic('arrow', 'ico arrow'));
-    b.addEventListener('click', (e) => {
-      if (PER) { e.preventDefault(); openSignIn(); return; } // per-tenant: e-mail → the tenant's own app
-      if (CFG.configured && !(CFG.setup && CFG.setup.forced)) return; // normal sign-in
-      e.preventDefault();
-      if (CFG.setup && CFG.setup.can) openSetup();
+    const navigates = !PER && CFG.configured && !CFG.setup?.forced;
+    const props = navigates ? { href: CFG.loginUrl } : { type: 'button', onclick: () => {
+      if (PER) openSignIn();
+      else if (CFG.setup?.can) openSetup();
       else notConfigured();
-    });
-    return size === 'lg' ? magnet(b, 8) : b;
+    } };
+    return h(navigates ? 'a' : 'button', { ...props, class: 'ms-btn ' + size, 'aria-label': loginLabel() },
+      h('span', { class: 'ms-mark', html: MS_LOGO }), h('span', { class: 'ms-label' }, raw(loginLabel())), ic('arrow', 'ico arrow'));
   }
 
   function avatar(cls = 'av') {
@@ -87,89 +82,36 @@
       avatar('av'), h('span', null, h('small', null, 'Criado por'), h('b', null, raw(CREATOR.name))), ic('ext', 'ico ext'));
   }
 
-  function scanner() {
-    const wrap = h('div', { class: 'scan', 'aria-hidden': 'true' });
-    wrap.append(h('div', { class: 'scan-glow' }), h('div', { class: 'scan-sweep' }));
-    wrap.append(svg('<svg class="scan-rings" viewBox="0 0 100 100"><defs>'
-      + '<linearGradient id="jr-a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#50d8f8" stop-opacity=".9"/><stop offset=".5" stop-color="#00b0ff" stop-opacity=".25"/><stop offset="1" stop-color="#0068b8" stop-opacity=".8"/></linearGradient>'
-      + '<linearGradient id="jr-b" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#00b0ff" stop-opacity=".55"/><stop offset=".6" stop-color="#50d8f8" stop-opacity=".12"/><stop offset="1" stop-color="#0068b8" stop-opacity=".5"/></linearGradient></defs>'
-      + '<circle cx="50" cy="50" r="30" class="r1"/><circle cx="50" cy="50" r="30" class="r1c"/>'
-      + '<circle cx="50" cy="50" r="37.5" class="rd"/>'
-      + '<circle cx="50" cy="50" r="45" class="r2"/><circle cx="50" cy="50" r="45" class="r2t"/><circle cx="50" cy="50" r="45" class="r2b"/></svg>'));
-    // Data packets travelling on the rings
-    for (const [r, dur, rev, d] of [[30, 11, false, 0], [45, 17, true, 3], [45, 23, false, 9], [21, 7, true, 1]]) {
-      wrap.append(h('div', { class: 'orbit pk' + (rev ? ' rev' : ''), style: `--dur:${dur}s;animation-delay:-${d}s` }, h('i', { class: 'packet', style: `--r:${r}` })));
-    }
-    for (const o of ORBITS) {
-      const orbit = h('div', { class: 'orbit' + (o.rev ? ' rev' : ''), style: `--dur:${o.dur}s` });
-      o.items.forEach(([name, label, svc], i) => {
-        const a = (360 / o.items.length) * i + (o.rev ? 22 : -18);
-        orbit.append(h('div', { class: 'sat', style: `--a:${a}deg;--r:${o.r};--i:${i}` },
-          h('div', { class: 'sat-i', 'data-label': t(label) + ' · ' + svc }, fi(name, 'fi'))));
-      });
-      wrap.append(orbit);
-    }
-    const L = CFG.logo || {};
-    const core = h('div', { class: 'scan-core' }, h('i', { class: 'ping' }), h('i', { class: 'ping p2' }), h('i', { class: 'core-ring' }), h('i', { class: 'core-shine' }),
-      L.light ? h('span', { class: 'core-logo' }, h('img', { class: 'logo-light', src: L.light, alt: 'Jornada 365' }), h('img', { class: 'logo-dark', src: L.dark || L.light, alt: '' })) : svg(cloudSvg('jcore')));
-    wrap.append(core);
-    const strip = h('div', { class: 'svc-strip', 'aria-label': t('Serviços analisados') }, ...SERVICES.map((x) => h('span', null, raw(x))));
-    const visual = h('div', { class: 'hero-visual' }, wrap, strip);
-    // Subtle 3D tilt that follows the pointer (desktop only, never with reduced motion).
-    try {
-      if (window.matchMedia('(pointer: fine)').matches && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        let raf = 0;
-        visual.addEventListener('pointermove', (e) => {
-          const b = visual.getBoundingClientRect();
-          const x = (e.clientX - b.left) / b.width - 0.5, y = (e.clientY - b.top) / b.height - 0.5;
-          cancelAnimationFrame(raf);
-          raf = requestAnimationFrame(() => { wrap.style.setProperty('--rx', (-y * 9).toFixed(2) + 'deg'); wrap.style.setProperty('--ry', (x * 11).toFixed(2) + 'deg'); });
-        });
-        visual.addEventListener('pointerleave', () => { cancelAnimationFrame(raf); wrap.style.setProperty('--rx', '0deg'); wrap.style.setProperty('--ry', '0deg'); });
-      }
-    } catch (e) { /* matchMedia unavailable */ }
-    return visual;
-  }
-
-  function stat(value, label) {
-    return h('div', { class: 'stat' }, h('div', { class: 'stat-v' }, h('b', { 'data-count': value }, raw('0'))), h('span', { class: 'stat-l' }, label));
-  }
-
   function nav() {
     const links = h('nav', { class: 'nav-links', 'aria-label': 'Seções' },
       h('a', { href: '#como-funciona' }, 'Como funciona'), h('a', { href: '#relatorios' }, 'Relatórios'), h('a', { href: '#seguranca' }, 'Segurança'), h('a', { href: '#faq' }, 'Perguntas'));
-    const bar = h('header', { class: 'lx-nav' },
-      h('a', { class: 'brand', href: '#top', 'aria-label': APP }, logo('nav-logo'), h('span', { class: 'brand-chip' }, raw('Tenant'))),
-      links,
-      h('div', { class: 'nav-tools' }, langSwitch(), themeToggle(), h('div', { class: 'nav-cta' }, signInButton('sm'))));
-    const onScroll = () => bar.classList.toggle('scrolled', window.scrollY > 12);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-    return bar;
+    const mark = CFG.logo?.light || BRAND === APP ? logo('nav-logo') : h('b', { class: 'entry-brand-name' }, raw(BRAND));
+    return h('header', { class: 'lx-nav' },
+      h('a', { class: 'brand', href: '#top', 'aria-label': BRAND }, mark),
+      links, h('div', { class: 'nav-tools' }, langSwitch(), themeToggle(), h('div', { class: 'nav-cta' }, signInButton('sm'))));
   }
 
   function hero(message) {
-    const note = !CFG.configured
-      ? (CFG.setup && CFG.setup.can
-        ? h('p', { class: 'hero-note op' }, ic('spark'), h('span', null, 'Você é administrador deste portal: o primeiro clique registra o ', h('strong', null, raw(APP)), ' no tenant da Jornada 365 e concede as permissões.'))
-        : h('p', { class: 'hero-note' }, ic('clock'), 'Portal em configuração. O login estará disponível em breve.'))
-      : h('p', { class: 'hero-note' }, ic('cloudoff'), h('span', null, h('strong', null, 'Relatórios na sua aba.'), ' ', 'O WordPress cifra o progresso enquanto prepara o resultado.'));
-    const cta = signInButton('lg');
-    return h('section', { class: 'lx-hero', id: 'top' },
+    const title = t('Relatórios do Microsoft 365').replace('Microsoft 365', 'Microsoft\u00a0365');
+    const entry = h('section', { class: 'entry-card hero-cta', id: 'entrada', 'aria-labelledby': 'entry-title' },
+      h('div', { class: 'entry-heading' }, h('span', { class: 'entry-lock', 'aria-hidden': 'true' }, ic('lock')), h('h2', { id: 'entry-title' }, 'Acessar o portal')));
+    if (PER) {
+      const body = h('div', { class: 'si' });
+      entry.append(body);
+      entryFocus = signInForm(body);
+    } else {
+      entry.append(h('p', { class: 'lead-sm' }, CFG.configured ? 'Continue com a conta corporativa da sua organização.' :
+        CFG.setup?.can ? 'Configure o aplicativo desta instalação para liberar o acesso ao portal.' : 'Portal em configuração. O login estará disponível em breve.'),
+        signInButton('lg'));
+    }
+    return h('section', { class: 'lx-hero', id: 'top', 'aria-labelledby': 'public-title' },
       h('div', { class: 'hero-copy' },
-        h('div', { class: 'hero-top', 'data-reveal': '' }, h('div', { class: 'eyebrow' }, h('i', { class: 'live' }), raw('Microsoft 365 · Entra ID · Intune')), creatorChip('hero-creator')),
-        h('h1', { 'data-reveal': '', style: '--d:1' }, h('span', { class: 'grad' }, 'Raio-X'), ' ', 'completo do seu tenant.'),
-        h('p', { class: 'lead', 'data-reveal': '', style: '--d:2' }, 'Identidade, MFA, dispositivos, Acesso Condicional, caixas de correio, OneDrive, licenças e segurança de aplicativos — em minutos, direto do Microsoft Graph, com ações para resolver e Excel executivo pronto.'),
-        message ? h('div', { class: 'note warn', role: 'alert' }, message) : null,
-        h('div', { class: 'cta-row hero-cta', 'data-reveal': '', style: '--d:3' }, cta, h('a', { class: 'ghost-btn', href: '#relatorios' }, 'Ver relatórios', ic('down'))),
-        h('div', { 'data-reveal': '', style: '--d:4' }, note),
-        h('div', { class: 'hero-foot', 'data-reveal': '', style: '--d:5' },
-          h('div', { class: 'stats' }, 
-            Number.isInteger(CFG.reportCount) ? stat(CFG.reportCount, 'relatórios') : null,
-            Array.isArray(CFG.permissions) ? stat(CFG.permissions.length, 'permissões de leitura dos relatórios') : null,
-            Number.isInteger(CFG.privacy?.auditDays) ? stat(CFG.privacy.auditDays, 'dias de retenção da auditoria') : null))),
-      scanner(),
-      h('a', { class: 'scroll-cue', href: '#como-funciona', 'aria-label': 'Mais informações' }, h('span', { class: 'mouse' }, h('i')), ic('chevron', 'ico chev')));
+        h('p', { class: 'entry-brand' }, raw(BRAND)),
+        h('h1', { id: 'public-title' }, raw(title)),
+        h('p', { class: 'lead' }, 'Consulte identidades, licenças e dispositivos com dados do Microsoft Graph. Exporte para Excel ou CSV.'),
+        message ? h('div', { class: 'entry-message note warn', role: 'alert' }, message) : null),
+      entry, h('div', { class: 'entry-links' }, h('a', { href: '#relatorios' }, 'Explorar relatórios', ic('down')),
+        h('a', { href: SOURCE, target: '_blank', rel: 'noopener' }, 'Código aberto no GitHub', ic('ext'))));
   }
 
   function steps() {
@@ -190,13 +132,14 @@
         h('div', { class: 'bad' }, h('b', null, raw('38')), h('span', null, 'Sem MFA')),
         h('div', { class: 'warn' }, h('b', null, raw('41')), h('span', null, 'Obsoletos'))),
       h('div', { class: 'mr-bars' }, ...[42, 58, 50, 72, 64, 80, 70, 88, 76, 94].map((v, i) => h('i', { style: `--v:${v}%;--i:${i}` }))));
-    const card = (n, icn, title, text, extra, d) => h('article', { class: 'step spot', 'data-reveal': '', style: `--d:${d}` },
+    const card = (n, icn, title, text, extra, d) => h('article', { class: 'step spot', style: `--d:${d}` },
       h('div', { class: 'step-top' }, h('span', { class: 'step-ic' }, fi(icn)), h('span', { class: 'step-n' }, raw(String(n).padStart(2, '0')))),
       h('h3', null, title), h('p', null, text), extra);
     return h('section', { class: 'lx-section', id: 'como-funciona' },
-      h('div', { class: 'sec-head', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Como funciona'), h('h2', null, 'Do login ao relatório em três passos'), h('p', null, 'Sem scripts, sem cadastro manual de aplicativo, sem senhas guardadas.')),
+      h('div', { class: 'sec-head' }, h('span', { class: 'kicker' }, 'Como funciona'), h('h2', null, 'Do login ao relatório em três passos'), h('p', null, 'Sem scripts, sem cadastro manual de aplicativo, sem senhas guardadas.')),
       h('div', { class: 'steps-track' }, h('i', { class: 'track-line' }),
-        PER ? card(1, 'contact_card', 'Informe o e-mail corporativo', 'O portal encontra o seu tenant e abre o login da Microsoft com o aplicativo do próprio tenant.', signin, 1)
+        COMPANY ? card(1, 'contact_card', 'Entre com sua conta corporativa', 'Continue com a conta corporativa da sua organização.', signin, 1)
+          : PER ? card(1, 'contact_card', 'Informe o e-mail corporativo', 'O portal encontra o seu tenant e abre o login da Microsoft com o aplicativo do próprio tenant.', signin, 1)
           : card(1, 'contact_card', 'Entre com sua conta corporativa', 'Use o botão Entrar com Microsoft 365. O login pede apenas openid, profile e email.', signin, 1),
         PER ? card(2, 'shield_checkmark', 'Conecte o seu tenant (uma vez)', 'Um administrador registra o aplicativo no diretório da empresa e aprova as permissões dos módulos habilitados.', consent, 2)
           : card(2, 'shield_checkmark', 'Aprove o Tenant Jornada365', 'Na primeira vez, o Global Administrator vê a tela de permissões da Microsoft e clica em Aceitar. O aplicativo empresarial é criado no seu tenant.', consent, 2),
@@ -205,11 +148,11 @@
   }
 
   function bento() {
-    const tiles = REPORTS.map((r, i) => h('article', { class: 'tile spot', 'data-reveal': '', style: `--d:${(i % 8) + 1}`, title: t(r.tag) },
+    const tiles = REPORTS.map((r, i) => h('article', { class: 'tile spot', style: `--d:${(i % 8) + 1}`, title: t(r.tag) },
       h('span', { class: 'tile-ic' }, fi(r.icon)),
       h('div', { class: 'tile-txt' }, h('h3', null, r.title), h('p', null, r.text))));
     return h('section', { class: 'lx-section', id: 'relatorios' },
-      h('div', { class: 'sec-head', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Relatórios'), h('h2', null, 'Tudo o que um analista de Modern Workplace precisa ver'), h('p', null, 'Filtros rápidos, detalhes por item, ações para resolver na hora e exportação em Excel com resumo executivo e gráficos.')),
+      h('div', { class: 'sec-head' }, h('span', { class: 'kicker' }, 'Relatórios'), h('h2', null, 'Catálogo de relatórios'), h('p', null, 'Filtros rápidos, detalhes por item, ações para resolver na hora e exportação em Excel com resumo executivo e gráficos.')),
       h('div', { class: 'bento' }, ...tiles));
   }
 
@@ -232,9 +175,9 @@
     ];
     return h('section', { class: 'lx-trust', id: 'seguranca' },
       h('div', { class: 'trust-in' },
-        h('div', { class: 'sec-head left', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Zero Trust'), h('h2', null, 'Segurança por padrão'), h('p', null, 'Confira os dados que o portal processa e as permissões dos módulos habilitados.')),
-        h('div', { class: 'facts' }, ...facts.map(([i, title, text], n) => h('div', { class: 'fact spot', 'data-reveal': '', style: `--d:${n + 1}` }, h('span', { class: 'fact-ic' }, fi(i)), h('div', null, h('h3', null, title), h('p', null, text))))),
-        h('details', { class: 'perm-box', 'data-reveal': '' }, h('summary', null, ic('lock'), h('span', null, 'Ver permissões dos módulos e fluxo de dados')), h('div', { class: 'perm-body' }, permissionsPanel(),
+        h('div', { class: 'sec-head left' }, h('span', { class: 'kicker' }, 'Zero Trust'), h('h2', null, 'Segurança por padrão'), h('p', null, 'Confira os dados que o portal processa e as permissões dos módulos habilitados.')),
+        h('div', { class: 'facts' }, ...facts.map(([i, title, text], n) => h('div', { class: 'fact spot', style: `--d:${n + 1}` }, h('span', { class: 'fact-ic' }, fi(i)), h('div', null, h('h3', null, title), h('p', null, text))))),
+        h('details', { class: 'perm-box' }, h('summary', null, ic('lock'), h('span', null, 'Ver permissões dos módulos e fluxo de dados')), h('div', { class: 'perm-body' }, permissionsPanel(),
           h('ol', { class: 'flow' },
             PER ? h('li', null, 'Você informa o e-mail e entra na Microsoft com o aplicativo do seu próprio tenant.') : h('li', null, 'Você entra com a conta corporativa (openid, profile, email).'),
             h('li', null, 'O servidor confirma no seu tenant que você tem uma função de administrador ou leitor.'),
@@ -254,7 +197,7 @@
     const out = h('code', { class: 'link-out' }, raw(consentLinkFor('')));
     input.addEventListener('input', () => { out.textContent = consentLinkFor(input.value); });
     const btn = h('button', { class: 'btn-solid', type: 'button', onclick: () => copyText(consentLinkFor(input.value), btn) }, ic('copy'), 'Copiar link');
-    return h('div', { class: 'admin-card spot', 'data-reveal': '' },
+    return h('div', { class: 'admin-card spot' },
       PER ? h('div', { class: 'admin-copy' }, h('span', { class: 'kicker' }, 'Não é administrador?'), h('h2', null, 'Envie o link de conexão para o seu admin'),
         h('p', null, 'Um administrador (Global, Cloud Application ou Application Administrator) abre o link e conecta o tenant em 1 minuto. Depois disso, você entra normalmente.'))
         : h('div', { class: 'admin-copy' }, h('span', { class: 'kicker' }, 'Não é administrador?'), h('h2', null, 'Envie o link de aprovação para o seu admin'),
@@ -279,12 +222,12 @@
       ['Como removo o acesso?', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.'],
     ];
     return h('div', { class: 'faq-wrap' },
-      h('div', { class: 'sec-head', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Perguntas'), h('h2', null, 'Perguntas frequentes')),
-      h('div', { class: 'faq' }, ...qa.map(([q, a], i) => h('details', { 'data-reveal': '', style: `--d:${i + 1}` }, h('summary', null, q), h('p', null, a)))));
+      h('div', { class: 'sec-head' }, h('span', { class: 'kicker' }, 'Perguntas'), h('h2', null, 'Perguntas frequentes')),
+      h('div', { class: 'faq' }, ...qa.map(([q, a], i) => h('details', { style: `--d:${i + 1}` }, h('summary', null, q), h('p', null, a)))));
   }
 
   function creatorCard() {
-    return h('aside', { class: 'creator-card spot', 'data-reveal': '' },
+    return h('aside', { class: 'creator-card spot' },
       h('div', { class: 'creator-photo' }, avatar('av-lg')),
       h('div', { class: 'creator-copy' },
         h('span', { class: 'kicker' }, 'Sobre o projeto'),
@@ -295,12 +238,12 @@
 
   function footer() {
     return h('footer', { class: 'lx-foot' },
-      h('div', { class: 'foot-cta', 'data-reveal': '' }, h('h2', null, 'Pronto para ver o seu tenant?'), signInButton('lg'), h('span', { class: 'foot-note' }, ic('cloudoff'), 'Relatórios na sua aba.')),
+      h('div', { class: 'foot-cta' }, h('h2', null, 'Pronto para ver o seu tenant?'), signInButton('lg'), h('span', { class: 'foot-note' }, ic('cloudoff'), 'Relatórios na sua aba.')),
       h('div', { class: 'foot-row' },
-        h('div', { class: 'foot-brand' }, logo('foot-logo'), h('span', { class: 'tagline' }, 'Inove, conecte-se, evolua.')),
+        h('div', { class: 'foot-brand' }, logo('foot-logo'), h('span', { class: 'tagline' }, raw(BRAND))),
         h('div', { class: 'foot-links' },
           h('a', { href: CREATOR.url, target: '_blank', rel: 'noopener' }, 'Criado por', ' ', raw(CREATOR.name)),
-          h('a', { href: 'https://github.com/sesantanajr/jornada365-tenant-reports', target: '_blank', rel: 'noopener' }, 'Código-fonte (GPL)'),
+          h('a', { href: SOURCE, target: '_blank', rel: 'noopener' }, 'Código-fonte (GPL)'),
           CFG.privacyUrl ? h('a', { href: CFG.privacyUrl, target: '_blank', rel: 'noopener' }, 'Privacidade') : null,
           CFG.termsUrl ? h('a', { href: CFG.termsUrl, target: '_blank', rel: 'noopener' }, 'Termos') : null,
           CFG.support ? h('a', { href: 'mailto:' + CFG.support }, 'Suporte') : null,
@@ -454,57 +397,77 @@
     return r;
   }
 
-  function openSignIn(opts = {}) {
+  function openSignIn(opts = {}) { entryFocus?.(opts); }
+
+  function signInForm(body) {
     const mem = AUTH.memory();
-    const email = h('input', { type: 'email', class: 'j365-input', name: 'email', autocomplete: 'username', inputmode: 'email', placeholder: 'voce@empresa.com', 'aria-label': 'E-mail corporativo', required: true });
-    email.value = opts.email || mem.email || '';
-    const go = h('button', { class: 'btn-solid si-go', type: 'submit' }, h('span', { class: 'ms-mark', html: MS_LOGO }), h('span', null, 'Continuar'));
-    const note = h('p', { class: 'si-note', role: 'status', 'aria-live': 'polite' });
-    const body = h('div', { class: 'si' });
-    const form = h('form', { class: 'si-form', novalidate: true }, COMPANY ? null : h('label', { class: 'si-label' }, h('span', null, 'E-mail corporativo'), email), go);
-    const d = dialog({ title: loginLabel(), body, cls: 'si-dlg' });
-    const show = () => {
-      body.innerHTML = '';
-      body.append(h('p', { class: 'lead-sm' }, COMPANY ? 'Continue para entrar com a sua conta Microsoft corporativa.' : 'Informe o seu e-mail de trabalho. O portal encontra o seu tenant e abre o login da Microsoft com o aplicativo do próprio tenant.'),
-        form, note,
-        h('p', { class: 'fine si-fine' }, ic('lock'), h('span', null, 'Digite a senha na Microsoft. O portal recebe os tokens da sua sessão para consultar os dados autorizados.')));
-      requestAnimationFrame(() => (COMPANY ? go : email).focus());
+    const email = h('input', { type: 'email', class: 'j365-input', name: 'email', autocomplete: 'username', inputmode: 'email', autocapitalize: 'none', spellcheck: 'false', required: true, 'aria-describedby': 'entry-feedback' });
+    email.value = mem.email || '';
+    const go = h('button', { class: 'btn-solid si-go', type: 'submit' },
+      h('span', { class: 'ms-mark', html: MS_LOGO }), h('span', null, raw(COMPANY?.label || t('Continuar com a Microsoft'))));
+    const note = h('p', { class: 'si-note', id: 'entry-feedback', role: 'status', 'aria-live': 'polite' });
+    const form = h('form', { class: 'si-form', novalidate: true }, COMPANY ? null : h('label', { class: 'si-label' }, 'E-mail corporativo', email), go);
+    const focusEntry = (opts = {}) => {
+      if (!form.isConnected) { body.querySelector('button')?.focus(); return; }
+      if (!COMPANY && opts.email) email.value = opts.email;
+      (COMPANY ? go : email).focus();
     };
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const q = COMPANY ? COMPANY.tenantId : email.value.trim();
-      if (!q) { email.focus(); return; }
-      go.disabled = true;
+    const show = () => {
+      go.disabled = false; email.readOnly = false;
+      email.removeAttribute('aria-invalid');
+      note.className = 'si-note'; note.textContent = '';
+      body.replaceChildren(h('p', { class: 'lead-sm' }, COMPANY ? 'Continue com a conta corporativa da sua organização.' : 'Informe seu e-mail de trabalho para localizar a sua organização.'),
+        form, note, h('p', { class: 'fine si-fine' }, ic('shield'), 'Sua senha é solicitada apenas na página da Microsoft.'));
+    };
+    function showUnconnected(r) {
+      const roles = CFG.spa?.connectRoles || [];
+      const copy = h('button', { class: 'btn-ghost', type: 'button', onclick: () => copyText(connectLink(r.tenantId), copy) }, ic('copy'), 'Copiar link para o administrador');
+      const heading = h('strong', { tabindex: '-1' }, t('O tenant {s} ainda não está conectado ao portal.', { s: r.domain || r.tenantId }));
+      const previous = mem.tenants?.[r.tenantId]?.clientId;
+      body.replaceChildren(h('div', { class: 'nc' },
+        h('div', { class: 'nc-head' }, h('span', { class: 'nc-ic' }, ic('shield')), h('div', null, heading,
+          h('p', null, 'Um administrador precisa conectar esta organização ao portal. Você pode enviar o link abaixo.'))),
+        h('div', { class: 'nc-actions' }, copy, h('button', { class: 'btn-ghost', type: 'button', onclick: () => openConnect({ tenantId: r.tenantId, domain: r.domain, loginHint: r.loginHint }) }, 'Conectar como administrador')),
+        previous ? h('button', { class: 'linkish', type: 'button', onclick: () => { show(); void submit({ ...r, ok: true, connected: true, clientId: previous }); } }, 'Entrar com o aplicativo já usado neste navegador') : null,
+        roles.length ? h('div', { class: 'role-chips' }, h('span', { class: 'muted small' }, 'Quem pode conectar:'), ...roles.map(x => h('span', { class: 'role-chip' }, raw(x)))) : null,
+        h('button', { class: 'linkish', type: 'button', onclick: () => { show(); focusEntry(); } }, COMPANY ? 'Voltar' : 'Usar outro e-mail')));
+      heading.focus();
+    }
+    async function submit(known) {
+      if (go.disabled) return;
+      go.disabled = true; email.readOnly = true;
       note.className = 'si-note'; note.textContent = t(COMPANY ? 'Preparando…' : 'Procurando o seu tenant…');
       try {
-        const r = await AUTH.post('auth/resolve', { q });
-        if (!r.ok) { note.className = 'si-note danger'; note.textContent = t(r.message || 'Não foi possível consultar a Microsoft agora. Tente novamente.'); go.disabled = false; return; }
-        if (r.connected) {
-          note.textContent = t('Abrindo a Microsoft…');
-          AUTH.remember(r.tenantId, r.clientId, r.loginHint);
-          await AUTH.signIn({ tenantId: r.tenantId, clientId: r.clientId, loginHint: r.loginHint });
-          return;
-        }
-        body.innerHTML = '';
-        body.append(notConnected(r, (mem.tenants || {})[r.tenantId], d, show));
-      } catch (err) { note.className = 'si-note danger'; note.textContent = err.message; go.disabled = false; }
+        const r = known || await AUTH.post('auth/resolve', { q: COMPANY ? COMPANY.tenantId : email.value.trim() });
+        if (!body.isConnected) return;
+        if (!r.ok) throw new Error(t(r.message || 'Não foi possível consultar a Microsoft agora. Tente novamente.'));
+        if (!r.connected) { showUnconnected(r); return; }
+        note.textContent = t('Abrindo a Microsoft…');
+        AUTH.remember(r.tenantId, r.clientId, r.loginHint);
+        await AUTH.signIn({ tenantId: r.tenantId, clientId: r.clientId, loginHint: r.loginHint });
+      } catch (e) {
+        if (!body.isConnected) return;
+        email.readOnly = false; go.disabled = false;
+        note.className = 'si-note danger';
+        note.textContent = e instanceof TypeError ? t('Não foi possível falar com o portal. Tente novamente.') : e.message;
+      }
+    }
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!COMPANY && (!email.value.trim() || !email.validity.valid)) {
+        email.setAttribute('aria-invalid', 'true');
+        note.className = 'si-note danger'; note.textContent = t('Informe um e-mail corporativo válido.');
+        email.focus(); return;
+      }
+      email.removeAttribute('aria-invalid');
+      void submit();
+    });
+    email.addEventListener('input', () => {
+      email.removeAttribute('aria-invalid');
+      if (note.classList.contains('danger')) { note.textContent = ''; note.className = 'si-note'; }
     });
     show();
-  }
-
-  function notConnected(r, known, d, back) {
-    const roles = (CFG.spa && CFG.spa.connectRoles) || [];
-    const copyBtn = h('button', { class: 'btn-ghost', type: 'button', onclick: () => copyText(connectLink(r.tenantId), copyBtn) }, ic('copy'), 'Copiar link para o administrador');
-    return h('div', { class: 'nc' },
-      h('div', { class: 'nc-head' }, h('span', { class: 'nc-ic' }, ic('shield')),
-        h('div', null, h('strong', null, t('O tenant {s} ainda não está conectado ao portal.', { s: r.domain || r.tenantId })),
-          h('p', null, 'Um administrador conecta o tenant uma única vez, direto daqui: o portal cria o aplicativo Tenant Jornada365 dentro do seu tenant. Sem script, sem segredo, sem depender de outro tenant.'))),
-      h('div', { class: 'nc-actions' },
-        h('button', { class: 'btn-solid', type: 'button', onclick: () => { d.close(); openConnect({ tenantId: r.tenantId, domain: r.domain, loginHint: r.loginHint }); } }, ic('shield'), 'Sou administrador: conectar o tenant'),
-        copyBtn),
-      known && known.clientId ? h('button', { class: 'linkish', type: 'button', onclick: () => AUTH.signIn({ tenantId: r.tenantId, clientId: known.clientId, loginHint: r.loginHint }) }, 'Entrar com o aplicativo já usado neste navegador') : null,
-      h('div', { class: 'role-chips' }, h('span', { class: 'muted small' }, 'Quem pode conectar:'), ...roles.map((x) => h('span', { class: 'role-chip' }, raw(x)))),
-      h('button', { class: 'linkish', type: 'button', onclick: back }, COMPANY ? 'Voltar' : 'Usar outro e-mail'));
+    return focusEntry;
   }
 
   /* ------------------------------------------------------------ connect a tenant (the app is created IN it) */
@@ -692,40 +655,24 @@
   function render(root, message) {
     root.innerHTML = '';
     root.className = 'j365tp lx-root';
-    const bg = h('div', { class: 'lx-bg', 'aria-hidden': 'true' }, h('i', { class: 'blob b1' }), h('i', { class: 'blob b2' }), h('i', { class: 'blob b3' }), h('div', { class: 'gridlines' }), h('div', { class: 'grain' }));
+    headerObserver?.disconnect();
+    entryFocus = null;
     const navBar = nav();
-    const page = h('div', { class: 'lx' }, navBar,
-      h('main', null, hero(message), steps(), bento(), trust(),
-        h('section', { class: 'lx-section narrow', id: 'faq' }, h('div', { class: 'faq-grid' }, h('div', { class: 'faq-side' }, adminCard(), creatorCard()), faq()))),
-      footer());
-    root.append(bg, page);
-    spotlight(page);
-    reveal(page);
-    // Only one sign-in button on screen: the header button appears only while neither the hero
-    // nor the footer sign-in button is visible.
-    const ctas = [...page.querySelectorAll('.hero-cta, .foot-cta')];
-    if (ctas.length && 'IntersectionObserver' in window) {
-      const seen = new Map(ctas.map((el) => [el, true]));
-      const io = new IntersectionObserver((entries) => {
-        entries.forEach((e) => seen.set(e.target, e.isIntersecting));
-        navBar.classList.toggle('show-cta', ![...seen.values()].some(Boolean));
+    const page = h('div', { class: 'lx' }, h('a', { class: 'entry-skip', href: '#main-public' }, 'Pular para o conteúdo'), navBar,
+      h('main', { id: 'main-public', tabindex: '-1' }, hero(message), steps(), bento(), trust(),
+        h('section', { class: 'lx-section narrow', id: 'faq' }, h('div', { class: 'faq-grid' }, h('div', { class: 'faq-side' }, adminCard(), creatorCard()), faq()))), footer());
+    root.append(page);
+    if ('IntersectionObserver' in window) {
+      const ctas = [...page.querySelectorAll('.hero-cta, .foot-cta')];
+      const seen = new Set(ctas);
+      headerObserver = new IntersectionObserver(entries => {
+        for (const e of entries) { if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target); }
+        navBar.classList.toggle('show-cta', !seen.size);
       }, { rootMargin: '-64px 0px 0px 0px' });
-      ctas.forEach((el) => io.observe(el));
+      ctas.forEach(el => headerObserver.observe(el));
     } else navBar.classList.add('show-cta');
-    // Scroll cue: visible on the first screen, hidden as soon as the visitor scrolls.
-    const onScroll = () => root.classList.toggle('scrolled', window.scrollY > 40);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-    page.querySelectorAll('[data-count]').forEach((el) => {
-      const go = () => countUp(el, Number(el.dataset.count), 1400);
-      if (RM || !('IntersectionObserver' in window)) { go(); return; }
-      const ob = new IntersectionObserver((en) => { if (en[0].isIntersecting) { go(); ob.disconnect(); } });
-      ob.observe(el);
-    });
-    if (location.hash && location.hash.length > 1 && location.hash !== '#setup') {
-      const target = page.querySelector(location.hash);
-      if (target) requestAnimationFrame(() => target.scrollIntoView());
-    }
+    const target = document.getElementById(location.hash.slice(1));
+    if (target && page.contains(target)) requestAnimationFrame(() => target.scrollIntoView());
     if (CFG.setup && CFG.setup.can && (CFG.setup.autoOpen || location.hash === '#setup')) setTimeout(openSetup, 400);
     if (PER) {
       const q = new URLSearchParams(location.search);

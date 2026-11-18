@@ -69,16 +69,19 @@
 
   /** Public auth endpoints of the portal: JSON in, JSON out (problems come back as { ok:false, url }). */
   async function post(path, body, extra) {
-    const res = await fetch(CFG.restUrl + path, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: Object.assign({ 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-J365-Lang': CFG.lang || 'pt-BR' }, extra || {}),
-      body: JSON.stringify(body || {}),
-    });
-    let data = null;
-    try { data = await res.json(); } catch (e) { /* */ }
-    if (!data) throw new Error(t('Não foi possível falar com o portal. Tente novamente.'));
-    return data;
+    const send = async (signal) => {
+      const res = await fetch(CFG.restUrl + path, {
+        method: 'POST', credentials: 'same-origin', signal,
+        headers: Object.assign({ 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-J365-Lang': CFG.lang || 'pt-BR' }, extra || {}),
+        body: JSON.stringify(body || {}),
+      });
+      let data = null;
+      try { data = await res.json(); } catch (e) { /* Non-JSON response from a host or proxy. */ }
+      if (!data) throw new Error(t('Não foi possível falar com o portal. Tente novamente.'));
+      return data;
+    };
+    if (path !== 'auth/resolve' && path !== 'auth/begin') return send();
+    return window.J365.withDeadline(25000, null, send, new Error(t('O servidor demorou para responder. Tente novamente.')));
   }
 
   /* ------------------------------------------------------------ sign-in (redirect) */

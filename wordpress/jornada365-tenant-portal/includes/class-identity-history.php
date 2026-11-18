@@ -49,6 +49,9 @@ final class Identity_History {
 	public static function status( string $tenant, string $report_generation = '' ): array {
 		$row = self::row( $tenant );
 		$status = [ 'enabled' => (bool) $row, 'collectedAt' => $row['collected_at'] ?? '' ];
+		$status['scheduleAvailable'] = ! Settings::per_tenant();
+		$status['scheduled'] = ! empty( $row['schedule_key'] );
+		$status['scheduleState'] = $row['schedule_state'] ?? '';
 		if ( '' !== $report_generation && $row && $report_generation === $row['generation'] ) {
 			$status['months'] = array_values( self::closings( json_decode( $row['months'] ?? '[]', true ) ?: [] ) );
 		}
@@ -72,7 +75,7 @@ final class Identity_History {
 	}
 
 	/** Merge concurrently completed reports without losing newer observations or restoring revoked data. */
-	public static function collect( string $tenant, string $generation, array $rows, bool $maintenance = false ): bool {
+	public static function collect( string $tenant, string $generation, array $rows, bool $maintenance = false, string $schedule_key = '' ): bool {
 		global $wpdb;
 		if ( '' === $generation ) {
 			return true;
@@ -81,7 +84,7 @@ final class Identity_History {
 		$incoming = self::closings( $rows );
 		for ( $attempt = 0; $attempt < 4; ++$attempt ) {
 			$row = self::row( $tenant );
-			if ( ! $row || $row['generation'] !== $generation ) {
+			if ( ! $row || $row['generation'] !== $generation || ( '' !== $schedule_key && $schedule_key !== $row['schedule_key'] ) ) {
 				return true;
 			}
 			$stored = json_decode( $row['months'], true ) ?: [];
@@ -91,8 +94,11 @@ final class Identity_History {
 			if ( $row['months'] === $months && $collected === $row['collected_at'] ) {
 				return true;
 			}
-			$updated = $wpdb->update( $table, [ 'months' => $months, 'oldest' => array_key_first( $merged ) ?? '', 'collected_at' => $collected, 'revision' => wp_generate_uuid4() ],
-				[ 'tenant_id' => strtolower( $tenant ), 'generation' => $generation, 'revision' => $row['revision'] ] );
+			$where = [ 'tenant_id' => strtolower( $tenant ), 'generation' => $generation, 'revision' => $row['revision'] ];
+			if ( '' !== $schedule_key ) {
+				$where['schedule_key'] = $schedule_key;
+			}
+			$updated = $wpdb->update( $table, [ 'months' => $months, 'oldest' => array_key_first( $merged ) ?? '', 'collected_at' => $collected, 'revision' => wp_generate_uuid4() ], $where );
 			if ( 1 === $updated || false === $updated ) {
 				return false !== $updated;
 			}

@@ -219,8 +219,8 @@
   const XL = {
     deep: '06213F', navy: '0A3A6B', blue: '0068B8', accent: '0072C6', sky: '00B0FF', cyan: '50D8F8', ink: '0B2440', text2: '3B5573', muted: '6A7F97', line: 'DDE7F1', soft: 'F2F7FC', soft2: 'F8FBFE',
     tone: { ok: ['0E8A52', 'E3F5EC'], warn: ['A86A00', 'FDF1DC'], danger: ['C93434', 'FBE4E4'], info: ['0068B8', 'E2F0FB'], muted: ['6A7F97', 'EEF3F8'] },
-    palette: ['246B67', 'B38444', '637A9B', '8A6C92', '4B927E', 'A76B52', '7D8D51', '60747C', 'B86B7C', '8D795C', '9CAAA6', 'B94945'],
-    status: { ok: '288066', warn: 'B87D26', danger: 'B94945', info: '49758C', muted: '9CAAA6' },
+    palette: ['3269AD', '27868A', 'C18A3B', '796DB3', '60844B', 'B76372', '538DAF', '9A734F', '7483A0', '97749E', '99AABC', 'BE5353'],
+    status: { ok: '298568', warn: 'B77B28', danger: 'BC5054', info: '397BB7', muted: '99AABC' },
   };
   const toneOf = (cls) => (/\bdanger\b/.test(cls || '') ? 'danger' : /\bwarn\b/.test(cls || '') ? 'warn' : /\bok\b/.test(cls || '') ? 'ok' : /\binfo\b/.test(cls || '') ? 'info' : '');
   /** Brand logo (the operator's Jornada 365 wordmark) as bytes for the workbook; null when unavailable. */
@@ -256,7 +256,7 @@
     return null;
   }
   /** Sheet names of each area in the executive workbook (≤ 31 characters). */
-  const SHEET_NAMES = { overview: 'Visão geral', identity: 'Usuários', inactive: 'Contas inativas', mfa: 'MFA', guests: 'Convidados', privileged: 'Acessos privilegiados', risk: 'Risco', devices: 'Dispositivos', apps: 'Aplicativos', ca: 'Acesso Condicional', authpolicies: 'Autenticação', appsec: 'Apps e consentimentos', securescore: 'Secure Score', identityscore: 'Identity Score', licensing: 'Licenças', usage: 'Uso do M365', mailboxes: 'Caixas de correio', storage: 'OneDrive e SharePoint', groups: 'Grupos', domains: 'Domínios' };
+  const SHEET_NAMES = { overview: 'Visão geral', identity: 'Usuários', inactive: 'Contas inativas', mfa: 'MFA', guests: 'Convidados', privileged: 'Acessos privilegiados', risk: 'Risco', devices: 'Dispositivos', devicescore: 'Score dos dispositivos', apps: 'Aplicativos', ca: 'Acesso Condicional', authpolicies: 'Autenticação', appsec: 'Apps e consentimentos', securescore: 'Secure Score', identityscore: 'Identity Score', licensing: 'Licenças', usage: 'Uso do M365', mailboxes: 'Caixas de correio', storage: 'OneDrive e SharePoint', groups: 'Grupos', domains: 'Domínios' };
   const SEVERITY = { danger: 0, warn: 1, info: 2, ok: 3 };
   const TONE_LABEL = { danger: 'Crítico', warn: 'Atenção', info: 'Informativo', ok: 'OK' };
   /**
@@ -509,7 +509,7 @@
       const isBytes = b.opts && b.opts.fmt === bytes;
       const monthly = b.opts?.kind === 'monthlyScore';
       const timeSeries = monthly || b.opts?.kind === 'scoreHistory';
-      const items = (timeSeries ? b.items : b.items.filter(([, v]) => +v > 0)).slice(0, monthly ? 24 : 12);
+      const items = ((timeSeries || b.opts?.kind === 'deviceScore') ? b.items : b.items.filter(([, v]) => +v > 0)).slice(0, monthly ? 24 : 12);
       if (!items.length) return r;
       const total = Number.isFinite(+b.total) && +b.total > 0 && items.every(([, value]) => +value <= +b.total) ? +b.total : 0;
       const val = (v) => timeSeries ? v : (isBytes ? Math.round(((+v || 0) / 1073741824) * 100) / 100 : +v || 0);
@@ -517,8 +517,8 @@
       r++;
       const top = r;
       ws.set(r, 1, t(monthly ? 'Mês (UTC)' : timeSeries ? 'Data da medição' : 'Categoria'), st.th).merge(r, 1, r, 3); ws.set(r, 2, null, st.th); ws.set(r, 3, null, st.th);
-      ws.set(r, 4, t(timeSeries ? 'Pontuação (%)' : (isBytes ? 'Tamanho' : 'Quantidade')), st.thR);
-      if (!timeSeries) ws.set(r, 5, '%', st.thR);
+      ws.set(r, 4, t(timeSeries ? 'Pontuação (%)' : b.opts?.kind === 'deviceScore' ? 'Pontuação (0–100)' : (isBytes ? 'Tamanho' : 'Quantidade')), st.thR);
+      if (!timeSeries && b.opts?.kind !== 'deviceScore') ws.set(r, 5, '%', st.thR);
       r++;
       const first = r;
       for (const [label, v] of items) {
@@ -743,7 +743,7 @@
       }
       return '';
     };
-    const bars = [...panel.querySelectorAll('ul.bars, .donut, .score-days, .overview-plot')].filter(mine).map((el) => {
+    const bars = [...panel.querySelectorAll('ul.bars, .donut, .score-days, .overview-plot, .device-score-plot')].filter(mine).map((el) => {
       const d = BAR_DATA.get(el);
       return d ? Object.assign({ title: heading(el) }, d) : null;
     }).filter(Boolean);
@@ -782,7 +782,7 @@
   }
 
   /** Views worth a section in the executive workbook (actions and administration are not reports). */
-  const EXEC_VIEWS = ['overview', 'identity', 'inactive', 'mfa', 'guests', 'privileged', 'risk', 'devices', 'apps', 'managed_apps', 'intune_assignments', 'ca', 'authpolicies', 'appsec', 'securescore', 'identityscore', 'licensing', 'usage', 'mailboxes', 'storage', 'groups', 'domains'];
+  const EXEC_VIEWS = ['overview', 'identity', 'inactive', 'mfa', 'guests', 'privileged', 'risk', 'devices', 'devicescore', 'apps', 'managed_apps', 'intune_assignments', 'ca', 'authpolicies', 'appsec', 'securescore', 'identityscore', 'licensing', 'usage', 'mailboxes', 'storage', 'groups', 'domains'];
   const EXEC_DEFAULT = ['overview', 'identity', 'inactive', 'mfa', 'privileged', 'risk', 'devices', 'ca', 'securescore', 'licensing', 'mailboxes', 'storage'];
   /** Renders views off-screen (the same code that draws the screen), waits for their reports and collects what they show. */
   async function harvestViews(ids, onStep) {
@@ -896,6 +896,8 @@
 
   /* ------------------------------------------------------------- table */
   /* select: { set: Set, id: (r) => key, can: (r) => bool, why: (r) => tooltip, onChange: () => void } */
+  const searchText = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
   function DataTable({ rows, columns, filters = [], facets = [], segments = null, searchKeys, name, pageSize = 50, onRowClick, emptyText = 'Nenhum registro.', compact = false, select = null, onDraw = null, sheet = '' }) {
     filters = (filters || []).filter(Boolean); // views may pass conditional filters as null
     const state = { q: '', filter: filters.find((f) => f.default)?.id || null, seg: (segments && segments.value) || 'all', sort: null, dir: 1, page: 0, pageSize };
@@ -908,7 +910,7 @@
     const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Filtros' });
     let qTimer = null; // large tenants: don't filter on every keystroke
     const search = h('input', { type: 'search', placeholder: 'Pesquisar…', 'aria-label': 'Pesquisar…', oninput: (e) => {
-      state.q = e.target.value.toLowerCase();
+      state.q = searchText(e.target.value);
       state.page = 0;
       clearTimeout(qTimer);
       qTimer = setTimeout(() => draw(false), rows.length > 2000 ? 220 : 40);
@@ -964,16 +966,29 @@
     wrap.append(...(segBar ? [segBar] : []), toolbar, ...(facetBar ? [facetBar] : []), chips, tablewrap, emptyState, pager);
 
     const keys = searchKeys || columns.map((c) => c.key).filter(Boolean);
+    const searchable = keys.map(key => ({ key, value: columns.find(col => col.key === key)?.value }));
     const segItem = () => (segments ? segments.items.find((x) => x.id === state.seg) : null);
     function base() { const sg = segItem(); return sg && sg.fn ? rows.filter(sg.fn) : rows; }
     // Search matches the raw value and its translation ("Híbrido" and "Hybrid").
-    const hay = (v) => (Array.isArray(v) ? v : [v]).filter((x) => x !== null && x !== undefined && typeof x !== 'object').map((x) => String(x) + ' ' + t(String(x))).join(' ').toLowerCase();
+    // Build localized search terms only when needed. Reuse common labels across large inventories.
+    const terms = new Map();
+    function hay(value) {
+      if (Array.isArray(value)) return value.map(hay).join(' ');
+      if (value == null || typeof value === 'object' || value === '') return '';
+      const key = String(value);
+      if (terms.has(key)) return terms.get(key);
+      const translated = t(key);
+      const term = searchText(translated === key ? key : key + ' ' + translated);
+      if (terms.size < 2048 && key.length < 96) terms.set(key, term);
+      return term;
+    }
     function baseMatches() {
       let out = base();
       const f = filters.find((x) => x.id === state.filter);
       if (f && f.fn) out = out.filter(f.fn);
       if (state.match) { const { key, value } = state.match; out = out.filter((r) => (Array.isArray(r[key]) ? r[key].includes(value) : r[key] === value)); }
-      if (state.q) out = out.filter((r) => keys.some((k) => { const v = r[k]; return v !== null && v !== undefined && v !== '' && hay(v).includes(state.q); }));
+      if (state.q) out = out.filter(row => searchable.some(col =>
+        hay(row[col.key]).includes(state.q) || (typeof col.value === 'function' && hay(col.value(row)).includes(state.q))));
       return out;
     }
     const facetValue = (row, key) => String(row[key] ?? '');
@@ -1157,7 +1172,7 @@
       if (segments && state.seg !== 'all' && segments.items.some((x) => x.id === 'all')) { state.seg = 'all'; if (segments.onChange) segments.onChange('all'); }
       draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    wrap.setSearch = (q) => { clearTimeout(qTimer); state.q = String(q || '').toLowerCase(); search.value = q || ''; state.page = 0; draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    wrap.setSearch = (q) => { clearTimeout(qTimer); state.q = searchText(q); search.value = q || ''; state.page = 0; draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     return wrap;
   }
 
@@ -1233,14 +1248,16 @@
   };
   /** Tone of a share: higher is better (≥ ok → ok, ≥ warn → warn, else danger), or lower is better with invert. */
   const toneFor = (p, ok = 90, warn = 75, invert = false) => (p === null || p === undefined || !isFinite(p) ? 'info' : invert ? (p <= ok ? 'ok' : p <= warn ? 'warn' : 'danger') : (p >= ok ? 'ok' : p >= warn ? 'warn' : 'danger'));
-  /** Health ring { pct, tone }: the arc and the number animate once when the report arrives. */
+  /** Keep the exact localized value and scale its type within the gauge. */
   function ring(spec) {
     const pct = Number(spec.pct);
     const C = 2 * Math.PI * 52, target = (C * (1 - Math.min(100, Math.max(0, pct)) / 100)).toFixed(2);
     const pctText = spec.pctText || fmtPct(pct);
     const el = h('div', { class: 'ring ' + (spec.tone || 'info'), role: 'img', 'aria-label': pctText + ' — ' + t(spec.label || '') });
+    el.style.setProperty('--label-length', Math.max(1, Array.from(pctText).length));
     el.innerHTML = `<svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-track" cx="60" cy="60" r="52"/><circle class="ring-val" cx="60" cy="60" r="52" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${target}" transform="rotate(-90 60 60)"/></svg>`;
     el.append(h('div', { class: 'ring-txt' }, h('b', null, raw(pctText))));
+    if (pct === 0) el.classList.add('ring-empty');
     return el;
   }
   /** Donut + legend for a distribution [[label, value, onclick?, tone?]] — read by the Excel export like bar lists. */
@@ -1262,9 +1279,11 @@
       off += len;
       return segment;
     });
+    const centerText = center == null ? (fmt ? fmt(base) : num(base)) : String(center);
     const chart = h('div', { class: 'd-chart' });
+    chart.style.setProperty('--label-length', Math.max(1, Array.from(centerText).length));
     chart.innerHTML = `<svg viewBox="0 0 42 42" aria-hidden="true"><circle class="d-track" cx="21" cy="21" r="15.915"/>${segs.map((sg, i) => `<circle class="d-seg" cx="21" cy="21" r="15.915" pathLength="100" stroke="${sg.color}" stroke-dasharray="${J.RM ? `${sg.len.toFixed(2)} ${(100 - sg.len).toFixed(2)}` : '0 100'}" stroke-dashoffset="${(25 - sg.off).toFixed(2)}" style="--i:${i}"/>`).join('')}</svg>`;
-    chart.append(h('div', { class: 'd-center' }, h('b', null, raw(center !== null && center !== undefined ? String(center) : (fmt ? fmt(base) : num(base)))), centerLabel ? h('span', null, centerLabel) : null));
+    chart.append(h('div', { class: 'd-center' }, h('b', null, raw(centerText)), centerLabel ? h('span', null, centerLabel) : null));
     const legend = h('ul', { class: 'd-legend' });
     items.forEach(([label, v, onclick], i) => {
       const pct = fmtPct(100 * v / base);
@@ -1345,7 +1364,7 @@
   const NAV = [
     { label: 'Geral', items: [['overview', 'Visão geral', 'overview', 'home'], ['activity', 'Meus relatórios', null, 'clock']] },
     { label: 'Identidade', items: [['identity', 'Usuários', 'identity', 'users'], ['inactive', 'Contas inativas', 'identity', 'clock'], ['mfa', 'MFA', 'mfa', 'key'], ['guests', 'Convidados', 'guests', 'guest'], ['privileged', 'Acessos privilegiados', 'privileged', 'crown'], ['risk', 'Risco', 'risk', 'pulse']] },
-    { label: 'Dispositivos & apps', items: [['devices', 'Dispositivos', 'devices', 'device'], ['apps', 'Apps descobertos', 'apps', 'box'], ['managed_apps', 'Apps gerenciados', 'managed_apps', 'box'], ['intune_assignments', 'Atribuições do catálogo', 'intune_assignments', 'users']] },
+    { label: 'Dispositivos & apps', items: [['devices', 'Dispositivos', 'devices', 'device'], ['devicescore', 'Score dos dispositivos', 'devicescore', 'gauge'], ['apps', 'Apps descobertos', 'apps', 'box'], ['managed_apps', 'Apps gerenciados', 'managed_apps', 'box'], ['intune_assignments', 'Atribuições do catálogo', 'intune_assignments', 'users']] },
     { label: 'Segurança', items: [['ca', 'Acesso Condicional', 'ca', 'shield'], ['authpolicies', 'Políticas de autenticação', 'authpolicies', 'lock'], ['appsec', 'Apps & consentimentos', 'appsec', 'plug'], ['securescore', 'Secure Score', 'securescore', 'gauge'], ['identityscore', 'Identity Score', 'identityscore', 'gauge']] },
     { label: 'Licenças & uso', items: [['licensing', 'Licenciamento', 'licensing', 'card'], ['usage', 'Uso do M365', 'usage', 'chart']] },
     { label: 'Exchange & arquivos', items: [['mailboxes', 'Caixas de correio', 'mailboxes', 'mail'], ['storage', 'OneDrive & SharePoint', 'storage', 'cloud']] },
@@ -1527,18 +1546,45 @@
 
     const closeMenu = h('button', { class: 'icon-btn drawer-close', type: 'button', 'aria-label': 'Fechar menu', title: 'Fechar menu', onclick: () => setMenu(false, true) }, raw('×'));
     const side = h('aside', { class: 'sidebar', id: 'j365-report-sidebar', 'aria-label': 'Relatórios' }, h('div', { class: 'side-brand' }, logo('side-logo'), h('span', { class: 'brand-chip' }, raw('Tenant')), closeMenu));
-    const navEl = h('nav', { class: 'side-nav', 'aria-label': 'Menu' });
+    const navEl = h('nav', { class: 'side-nav', id: 'j365-report-nav', 'aria-label': 'Menu' });
+    const navSearch = h('input', { type: 'search', placeholder: 'Localizar no menu', 'aria-label': 'Localizar no menu', 'aria-controls': navEl.id, autocomplete: 'off' });
+    const noMatch = h('p', { class: 'nav-empty', role: 'status', hidden: true }, 'Nenhum item encontrado.');
+    function filterMenu() {
+      const query = searchText(navSearch.value);
+      for (const section of navEl.querySelectorAll('.nav-family')) {
+        const groupMatch = searchText(section.firstElementChild.textContent).includes(query);
+        const buttons = section.querySelectorAll('.side-link');
+        for (const button of buttons) button.hidden = !groupMatch && !searchText(button.textContent).includes(query);
+        section.hidden = !section.querySelector('.side-link:not([hidden])');
+      }
+      noMatch.hidden = !!navEl.querySelector('.side-link:not([hidden])');
+      navEl.scrollTop = 0;
+    }
+    navSearch.addEventListener('input', filterMenu);
+    navSearch.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && navSearch.value) {
+        event.preventDefault();
+        event.stopPropagation();
+        navSearch.value = '';
+        filterMenu();
+      } else if (event.key === 'Enter') {
+        const matches = navEl.querySelectorAll('.side-link:not([hidden])');
+        if (matches.length === 1) matches[0].click();
+      }
+    });
     for (const g of groups) {
-      navEl.append(h('div', { class: 'side-group' }, g.label));
+      const section = h('div', { class: 'nav-family' }, h('div', { class: 'side-group' }, g.label));
+      navEl.append(section);
       for (const [id, label, req, ic] of g.items) {
         const moduleOff = id === 'identityscore' && !reports.includes(id);
         const locked = moduleOff || blocked.has(id) || [].concat(req || []).some((x) => blocked.has(x));
         const lockTitle = moduleOff ? 'Módulo desativado no WordPress' : 'Permissão pendente de aprovação neste tenant';
-        navEl.append(h('button', { class: 'side-link' + (locked ? ' locked' : ''), 'data-v': id, type: 'button', title: locked ? t(lockTitle) : null, onclick: () => { go(id); if (narrow.matches) setMenu(false, true); } }, icon(ic), h('span', null, label), locked ? icon('lock2', 'ico lockmark') : null));
+        section.append(h('button', { class: 'side-link' + (locked ? ' locked' : ''), 'data-v': id, type: 'button', title: locked ? t(lockTitle) : null, onclick: () => { go(id); if (narrow.matches) setMenu(false, true); } }, icon(ic), h('span', null, label), locked ? icon('lock2', 'ico lockmark') : null));
       }
     }
     const creator = window.J365Landing && window.J365Landing.creatorChip ? window.J365Landing.creatorChip('side-creator') : null;
-    side.append(navEl, h('div', { class: 'side-foot' },
+    navEl.append(noMatch);
+    side.append(h('label', { class: 'nav-search' }, icon('search'), navSearch), navEl, h('div', { class: 'side-foot' },
       (() => { const ls = langSwitch(); ls.classList.add('side-lang'); return ls; })(),
       creator,
       h('span', { class: 'side-ver' }, raw('v' + CFG.version))));
@@ -1635,7 +1681,7 @@
       if (!narrow.matches || side.hidden || document.querySelector('.dlg-bg')) return;
       if (event.key === 'Escape') { event.preventDefault(); setMenu(false, true); }
       if (event.key !== 'Tab') return;
-      const visible = [...side.querySelectorAll('button:not(:disabled), a[href]')].filter((el) => el.getClientRects().length);
+      const visible = [...side.querySelectorAll('button:not(:disabled), input:not(:disabled), a[href]')].filter((el) => el.getClientRects().length);
       const last = visible[visible.length - 1];
       if (event.shiftKey && document.activeElement === closeMenu) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); closeMenu.focus(); }
@@ -1651,7 +1697,7 @@
 
     const go = (v, keepScroll = false, replace = false) => {
       App.onReportSettled = null;
-      if (!avail.includes(v)) v = 'overview';
+      if (!avail.includes(v)) v = avail.includes('overview') ? 'overview' : 'activity';
       App.view = v;
       for (const b of side.querySelectorAll('.side-link')) { const on = b.dataset.v === v; b.classList.toggle('active', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
       content.innerHTML = '';
@@ -1719,6 +1765,7 @@
     groups: DIRECTORY_READ, guests: DIRECTORY_READ, domains: DIRECTORY_READ, licensing: DIRECTORY_READ,
     devices: ['Directory.Read.All', ...DEVICE_READ], apps: DEVICE_READ, app_devices: DEVICE_READ,
     managed_apps: APPS_READ, intune_assignments: APPS_READ, app_assignments: APPS_READ, app_failures: APPS_READ,
+    devicescore: DEVICE_READ,
     device_compliance: ['DeviceManagementConfiguration.Read.All'], ca: ['Policy.Read.All'], authpolicies: ['Policy.Read.All'],
     mfa: ['AuditLog.Read.All'], privileged: ['RoleManagement.Read.All'], risk: ['IdentityRiskyUser.Read.All'],
     securescore: ['SecurityEvents.Read.All'], identityscore: ['DirectoryRecommendations.Read.All'],
@@ -1732,6 +1779,7 @@
     ca: ['entra/identity/conditional-access/overview', 'O Acesso Condicional requer Entra ID P1 ou uma licença que o inclua.'],
     privileged: ['entra/id-governance/licensing-fundamentals', 'A elegibilidade no PIM depende de uma licença compatível com o recurso.'],
     securescore: ['graph/security-authorization', '', 'Security Reader'],
+    devicescore: ['intune/endpoint-analytics/index', 'A leitura exige Intune ativo, dispositivos Windows elegíveis e coleta de dados do Endpoint Analytics configurada.', 'Reports Reader'],
     identityscore: ['graph/api/recommendation-tenantsecurescores?view=graph-rest-beta', '', 'Reports Reader'],
   };
   function reportGuide(type, section) {
@@ -1810,6 +1858,10 @@
     if (type === 'risk') {
       graphSource = issue.section?.includes('IdentityRiskEvent.Read.All') ? '/identityProtection/riskDetections' : '/identityProtection/riskyUsers';
     }
+    if (type === 'devicescore' && issue.section) {
+      const endpoint = { 'Pontuação do tenant indisponível': 'Overview', 'Referências de comparação indisponíveis': 'Baselines', 'Lista de dispositivos incompleta': 'DeviceScores' }[issue.section];
+      if (endpoint) graphSource = '/deviceManagement/userExperienceAnalytics' + endpoint;
+    }
     if (graphSource && ['access', 'license', 'request', 'unavailable', 'authorization'].includes(issue.kind)) diagnosis.push(graphSource);
     if (diagnosis.length) {
       content.append(h('details', null, h('summary', null, 'Detalhes técnicos'), ...diagnosis.map(text => h('p', null, raw(text)))));
@@ -1828,10 +1880,11 @@
     const cancel = h('button', { class: 'btn sm glass rp-cancel', type: 'button', hidden: true, onclick: () => request?.abort() }, 'Cancelar espera');
     const ringBox = h('div', { class: 'rp-ring', hidden: true });
     const tools = h('div', { class: 'rp-tools' }, opts.controls || null, refresh, cancel, opts.tools || null);
+    const category = NAV.find(group => group.items.some(([id]) => id === type));
     const hero = h('header', { class: 'rp-hero' },
       h('div', { class: 'rp-main' },
         h('div', { class: 'rp-ic', 'aria-hidden': 'true' }, icon(opts.icon || navIcon(type))),
-        h('div', { class: 'rp-txt' }, h2, opts.subtitle ? h('p', { class: 'rp-sub' }, opts.subtitle) : null, status)),
+        h('div', { class: 'rp-txt' }, category ? h('p', { class: 'rp-category' }, category.label) : null, h2, opts.subtitle ? h('p', { class: 'rp-sub' }, opts.subtitle) : null, status)),
       ringBox, tools);
     const body = h('div', { class: 'rp-body' });
     const feedback = h('div', { class: 'rp-feedback', hidden: true });
@@ -2339,6 +2392,84 @@
       h('div', null, h('h3', null, 'Gerenciamento (Intune)'), kv([['No Intune', yesNo(r.inIntune)], ['Conformidade', r.compliance ? badge(...compliance(r.compliance)) : '—'], ['Último sync', fmtDate(r.lastSyncIntune)], ['Dias sem sync', r.daysSinceSync ?? '—'], ['Usuário primário', raw(r.primaryUser || '—')], ['Agente de gerenciamento', AGENT[r.managementAgent] || r.managementAgent], ['Tipo de registro', ENROLL[r.enrollmentType] || r.enrollmentType], ['Registrado no Intune', fmtDate(r.enrolled)], ['Categoria', r.category]])),
       h('div', null, h('h3', null, 'Hardware e segurança'), kv([['Fabricante', raw(r.manufacturer || '—')], ['Modelo', raw(r.model || '—')], ['Serial', raw(r.serial || '—')], ['Criptografado', r.encrypted === null ? '—' : yesNo(r.encrypted)], ['Supervisionado', r.supervised === null || r.supervised === undefined ? '—' : yesNo(r.supervised)], ['Autopilot', r.autopilot === null ? '—' : yesNo(r.autopilot)], ['Perfil Autopilot', raw(r.autopilotProfile || '—')]])))));
   }
+  const DEVICE_SCORE_METRICS = {
+    boot: 'Desempenho de inicialização', apps: 'Confiabilidade de aplicativos', work: 'Trabalho de qualquer lugar',
+    resources: 'Desempenho de recursos', battery: 'Integridade da bateria', practices: 'Práticas recomendadas',
+  };
+  const deviceScoreState = state => ({
+    meetingGoals: ['Dentro da meta', 'ok'], needsAttention: ['Requer atenção', 'warn'],
+    insufficientData: ['Dados insuficientes', ''], unknown: ['Estado desconhecido', ''], unknownFutureValue: ['Estado desconhecido', ''],
+  })[state] || [state || 'Estado não informado', ''];
+  const hasDeviceScore = score => Number.isFinite(score) && score >= 0 && score <= 100;
+  const scoreColumn = (key, label) => ({ key, label, render: row => hasDeviceScore(row[key]) ? raw(num(row[key])) : '—', export: row => hasDeviceScore(row[key]) ? row[key] : null });
+  const scoreStateColumn = { key: 'state', label: 'Estado informado', render: r => badge(...deviceScoreState(r.state)), export: r => t(deviceScoreState(r.state)[0]) };
+
+  function deviceScoreInventory() {
+    return reportPanel('devicescore', { section: 'devices' }, 'Pontuações por dispositivo', p => {
+      const rows = p.rows || [], box = h('div');
+      const states = [['attention', 'Requer atenção', 'needsAttention'], ['goals', 'Dentro da meta', 'meetingGoals'], ['insufficient', 'Dados insuficientes', 'insufficientData']];
+      const table = DataTable({ rows, name: 'score-dispositivos', sheet: 'Experiência por dispositivo', columns: [
+        { key: 'name', label: 'Dispositivo' }, { key: 'manufacturer', label: 'Fabricante' }, { key: 'model', label: 'Modelo' },
+        scoreColumn('score', 'Score de experiência'), scoreStateColumn,
+        ...['boot','apps','work','battery'].map(key => scoreColumn(key, DEVICE_SCORE_METRICS[key])),
+        { key: 'id', label: 'ID do registro de análise', exportOnly: true },
+      ], filters: states.map(([id,label,state]) => ({ id, label, fn: row => row.state === state })), emptyText: 'O Endpoint Analytics não retornou registros de dispositivos nesta consulta.' });
+      box.append(kpis([{ label: 'Registros retornados', value: rows.length }, { label: 'Com pontuação de experiência', value: rows.filter(row => hasDeviceScore(row.score)).length },
+        ...states.map(([id,label,state]) => ({ label, value: rows.filter(row => row.state === state).length, onclick: () => table.setFilter(id) }))]), table);
+      return box;
+    }, { subtitle: 'Equipamentos avaliados pelo Endpoint Analytics. Os indicadores contam as linhas retornadas; cada pontuação varia de 0 a 100 pontos.', icon: 'device', graphSource: '/deviceManagement/userExperienceAnalyticsDeviceScores' });
+  }
+
+  views.devicescore = () => {
+    const root = h('div'), exported = Array.isArray(App.harvesting);
+    const detail = h('div', { class: 'device-score-detail' });
+    function openDevices() {
+      if (!detail.firstElementChild) detail.append(deviceScoreInventory());
+      const heading = detail.querySelector('h2');
+      if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+      detail.scrollIntoView({ block: 'start' });
+    }
+    const links = exported ? null : h('div', { class: 'actions' },
+      h('button', { class: 'btn sm primary', type: 'button', onclick: openDevices }, icon('device'), 'Consultar pontuações por dispositivo'),
+      App.me?.reports?.includes('devices') ? h('a', { class: 'btn sm', href: '#devices' }, 'Inventário de dispositivos') : null);
+    const summary = reportPanel('devicescore', {}, 'Score dos dispositivos', p => {
+      const base = p.rows || [], org = p.overview, metrics = org?.metrics || [], box = h('div');
+      const median = base.find(row => row.builtIn === true);
+      const delta = value => hasDeviceScore(org?.score) && hasDeviceScore(value) ? Number((org.score - value).toFixed(2)) : null;
+      box.append(kpis([{ label: 'Experiência do tenant (0–100)', value: org?.score },
+        { label: 'Mediana das organizações', value: median?.score }, { label: 'Diferença para a mediana (pontos)', value: delta(median?.score) },
+        { label: 'Estado informado', value: org ? t(deviceScoreState(org.state)[0]) : null }]));
+      if (org?.state === 'insufficientData') box.append(h('p', { class: 'alert info' }, 'O Intune indicou dados insuficientes. Para um score significativo, a Microsoft exige pelo menos cinco dispositivos com dados reportados.'));
+      const valid = metrics.filter(row => hasDeviceScore(row.score));
+      if (valid.length) {
+        const plot = h('div', { class: 'device-score-plot' });
+        const entries = valid.map(row => [t(DEVICE_SCORE_METRICS[row.metric] || row.metric), row.score]);
+        BAR_DATA.set(plot, { title: t('Experiência por categoria'), items: entries, total: 0, opts: { kind: 'deviceScore' } });
+        for (const [label,score] of entries) plot.append(h('div', null, h('span', null, raw(label)),
+          h('i', { 'aria-hidden': 'true' }, h('b', { style: 'width:' + score + '%' })), h('strong', null, raw(num(score)))));
+        box.append(h('h3', null, 'Experiência por categoria'), plot);
+      }
+      box.append(DataTable({ rows: metrics, name: 'metricas-experiencia', sheet: 'Métricas de experiência', compact: true, columns: [
+        { key: 'metric', label: 'Categoria', render: row => t(DEVICE_SCORE_METRICS[row.metric] || row.metric), export: row => t(DEVICE_SCORE_METRICS[row.metric] || row.metric) },
+        scoreColumn('score', 'Pontuação (0–100)'), scoreStateColumn,
+      ], emptyText: org ? 'O Intune não publicou métricas por categoria nesta consulta.' : 'As métricas do tenant estão indisponíveis.' }));
+      box.append(h('h3', null, 'Referências de comparação'), DataTable({ rows: base, name: 'referencias-experiencia', sheet: 'Referências do Intune', compact: true,
+        emptyText: p.partial ? 'As referências do Intune estão indisponíveis nesta consulta.' : 'O Intune não retornou referências de comparação.', columns: [
+          { key: 'name', label: 'Nome' }, { key: 'builtIn', label: 'Tipo', render: row => row.builtIn === true ? t('Mediana das organizações') : row.builtIn === false ? t('Referência personalizada') : '—',
+            export: row => row.builtIn === true ? t('Mediana das organizações') : row.builtIn === false ? t('Referência personalizada') : null },
+          scoreColumn('score', 'Referência (pontos)'), { key: 'delta', label: 'Diferença do tenant (pontos)', render: row => raw(num(delta(row.score))), export: row => delta(row.score) },
+          { key: 'created', label: 'Criado em', render: row => row.builtIn ? '—' : fmtDate(row.created), export: row => row.builtIn ? null : row.created },
+        ] }));
+      return box;
+    }, { subtitle: 'Experiência dos dispositivos Windows segundo o Intune Endpoint Analytics, de 0 a 100 pontos. Valores maiores indicam melhor experiência.', icon: 'gauge',
+      graphSource: '/deviceManagement/userExperienceAnalyticsOverview /deviceManagement/userExperienceAnalyticsBaselines',
+      tools: links });
+    root.append(summary);
+    if (exported || App.cache['devicescore' + JSON.stringify({ section: 'devices' })]) detail.append(deviceScoreInventory());
+    root.append(detail);
+    return root;
+  };
+
   views.devices = () => {
     const wrap = h('div');
     const days = h('input', { type: 'number', min: 1, max: 730, value: App.params.devStale || App.me.defaults.stale_device_days, class: 'j365-input', 'aria-label': 'Obsoleto após (dias sem login no Entra e sem sync no Intune)' });
@@ -2427,7 +2558,7 @@
         box.append(table);
         box.append(h('p', { class: 'muted small foot-note' }, t('Ciclo de vida conforme Microsoft (Windows release health, Lifecycle) e sistemas suportados pelo Intune, verificado em {s}. Edição do Windows nem sempre é informada: quando ausente, vale a data Enterprise/Education.', { s: isoDay(p._meta.lifecycleAsOf || '2026-11-01') })));
         return box;
-      }, { subtitle: 'Consulte os dispositivos do Entra ID e do Intune. Filtre por versão ou build e abra um dispositivo para ver suas políticas de conformidade.', controls: form, ring: (p) => {
+      }, { subtitle: 'Consulte os dispositivos do Entra ID e do Intune. Filtre por versão ou build e abra um dispositivo para ver suas políticas de conformidade.', controls: form, tools: App.me.reports.includes('devicescore') ? h('a', { class: 'btn sm', href: '#devicescore' }, icon('gauge'), 'Score dos dispositivos') : null, ring: (p) => {
         const mdm = p.rows.filter((r) => r.inIntune);
         if (mdm.length) { const ok = mdm.filter((r) => String(r.compliance).toLowerCase() === 'compliant').length, pc = pctOf(ok, mdm.length); return { pct: pc, label: 'dos dispositivos do Intune em conformidade', caption: t('{a} de {b} dispositivos', { a: num(ok), b: num(mdm.length) }), tone: toneFor(pc, 90, 75) }; }
         const assessed = p.rows.filter((r) => ['supported', 'ending', 'unsupported'].includes(r.support));
@@ -2984,12 +3115,12 @@
     const calendar = new Date(value.slice(0, 10) + 'T00:00:00Z'), actual = new Date(value);
     return Number.isFinite(+actual) && Number.isFinite(+calendar) && calendar.toISOString().slice(0, 10) === value.slice(0, 10) ? actual.toISOString() : '';
   };
-  const scorePercent = (d) => d && Number.isFinite(d.current) && Number.isFinite(d.max) && d.current >= 0 && d.max > 0 && d.current <= d.max ? 100 * d.current / d.max : null;
+  const scorePercent = (d) => d && Number.isSafeInteger(d.current) && Number.isSafeInteger(d.max) && d.current >= 0 && d.max > 0 && d.current <= d.max ? 100 * d.current / d.max : null;
   const scorePercentText = (n) => n == null ? '—' : Number(n.toFixed(2)).toLocaleString(CFG.intl || 'pt-BR') + '%';
   const scoreUtcDay = (value) => scoreStamp(value).slice(0, 10);
 
   function scoreCalendar(graph, archive, end, months, stored = []) {
-    const bins = new Map(), start = new Date(end.slice(0, 7) + '-01T00:00:00Z');
+    const bins = new Map(), start = new Date(end.slice(0, 7) + '-01T00:00:00Z'), now = new Date().toISOString();
     start.setUTCMonth(start.getUTCMonth() - months + 1);
     for (let i = 0; i < months; ++i) {
       const month = start.toISOString().slice(0, 7);
@@ -2998,15 +3129,21 @@
     }
     // Each archived monthly closing is just one observed day. Never interpolate a missing day.
     const byDay = new Map();
+    const sources = [];
     for (const [source, rows] of [['Arquivo local', archive], ['Histórico do portal', stored], ['Microsoft Graph', graph]]) {
+      const dates = new Set();
       for (const item of rows) {
         const date = scoreStamp(item.date), day = date.slice(0, 10);
-        if (!bins.has(day.slice(0, 7)) || day > end) continue;
+        if (!bins.has(day.slice(0, 7)) || day > end || date > now) continue;
         const percent = scorePercent(item), prior = byDay.get(day);
+        if (percent != null) dates.add(day);
         if (prior?.source === 'Histórico do portal' && source === 'Microsoft Graph' && prior.percent != null && prior.date > date) continue;
         if (prior && (prior.percent != null && percent == null || (prior.percent == null) === (percent == null) && prior.source === source && prior.date >= date)) continue;
         byDay.set(day, { date, current: item.current, max: item.max, percent, source });
       }
+      const ordered = [...dates].sort();
+      sources.push({ source, days: dates.size, observed: new Set(ordered.map(d => d.slice(0, 7))).size,
+        first: ordered[0] || '', last: ordered.at(-1) || '' });
     }
     const daily = [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date));
     for (const day of daily) {
@@ -3015,37 +3152,63 @@
       if (!month.samples) Object.assign(month, day);
       month.samples++;
     }
-    return { daily, months: [...bins.values()] };
+    const calendar = [...bins.values()];
+    for (const source of sources) source.closings = calendar.filter(row => row.source === source.source).length;
+    return { daily, months: calendar, sources: sources.reverse() };
   }
 
   function monthlyScoreChart(months) {
     const chart = h('div', { class: 'score-days score-months', tabindex: '0', role: 'region', 'aria-label': 'Evolução mensal do Identity Score' });
     const intl = new Intl.DateTimeFormat(CFG.intl || 'pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' });
-    for (const row of months) {
-      const label = intl.format(new Date(row.month + '-01T00:00:00Z'));
-      const detail = row.percent == null ? t('Sem medição válida') : t('{a} de {b} pontos', { a: num(row.current), b: num(row.max) }) + ' · ' + fmtDay(row.date.slice(0, 10)) + ' UTC';
-      chart.append(h('div', { class: 'score-day' + (row.percent == null ? ' missing' : ''), title: row.month + ' · ' + detail }, h('strong', null, raw(scorePercentText(row.percent))), h('span', { class: 'score-track', 'aria-hidden': 'true' }, row.percent == null ? null : h('i', { style: 'height:' + row.percent + '%' })), h('span', null, raw(label))));
+    const label = row => {
+      const parts = intl.formatToParts(new Date(row.month + '-01T00:00:00Z'));
+      return parts.find(p => p.type === 'month').value.replace(/\.$/, '') + '/' + parts.find(p => p.type === 'year').value;
+    };
+    for (let i = 0; i < months.length; ++i) {
+      const row = months[i];
+      if (row.percent == null) {
+        const start = i;
+        while (i + 1 < months.length && months[i + 1].percent == null) i++;
+        const count = i - start + 1;
+        const period = count === 1 ? label(row) : label(row) + ' – ' + label(months[i]);
+        const empty = count === 1 ? t('Mês sem medição') : t('{n} meses sem medição', { n: count });
+        chart.append(h('div', { class: 'score-gap', title: period + ' · ' + empty }, h('strong', null, raw(empty)), h('span', null, raw(period))));
+        continue;
+      }
+      const detail = t('{a} de {b} pontos', { a: num(row.current), b: num(row.max) }) + ' · ' + fmtDay(row.date.slice(0, 10)) + ' UTC · ' + t(row.source);
+      chart.append(h('div', { class: 'score-day', title: row.month + ' · ' + detail }, h('strong', null, raw(scorePercentText(row.percent))), h('span', { class: 'score-track', 'aria-hidden': 'true' }, h('i', { style: 'height:' + row.percent + '%' })), h('span', null, raw(label(row)))));
     }
     BAR_DATA.set(chart, { items: months.map((row) => [row.month, row.percent == null ? null : Number(row.percent.toFixed(2))]), total: null, opts: { kind: 'monthlyScore' } });
-    return vizCard('Evolução mensal do Identity Score', chart);
+    const count = chart.childElementCount;
+    for (const [size, maximum] of [['wide', 15], ['medium', 9], ['small', 4]]) {
+      chart.style.setProperty('--score-' + size, Math.ceil(count / Math.ceil(count / maximum)));
+    }
+    const card = vizCard('Evolução mensal do Identity Score', chart);
+    card.classList.add('score-history-card');
+    return card;
   }
 
   function scoreArchiveControls(tenantId, graph, end, refresh, stored) {
     const format = 'j365.identity-score.v1', notice = h('p', { class: 'muted small', role: 'status' });
-    const picker = h('input', { type: 'file', accept: '.json,application/json', 'aria-label': 'Importar arquivo de histórico' });
+    const picker = h('input', { type: 'file', multiple: true, accept: '.json,application/json', 'aria-label': 'Importar arquivo de histórico' });
+    async function read(file) {
+      if (file.size > 1024 * 1024) throw new Error('Arquivo de histórico inválido.');
+      const data = JSON.parse(await file.text());
+      if (data?.format !== format || !Array.isArray(data.observations) || data.observations.length > 1000) throw new Error('Arquivo de histórico inválido.');
+      if (typeof data.tenantId !== 'string' || data.tenantId.toLowerCase() !== tenantId) throw new Error('Este arquivo pertence a outro tenant.');
+      return data.observations.map((d) => {
+        const date = scoreStamp(d?.date);
+        if (!date || date > new Date().toISOString() || date.slice(0, 10) > end || scorePercent(d) == null) throw new Error('Arquivo de histórico inválido.');
+        return { date, current: d.current, max: d.max };
+      });
+    }
     picker.onchange = async () => {
-      const file = picker.files?.[0];
-      if (!file) return;
+      const files = Array.from(picker.files || []);
+      if (!files.length) return;
       try {
-        if (file.size > 1024 * 1024) throw new Error('Arquivo de histórico inválido.');
-        const data = JSON.parse(await file.text());
-        if (data?.format !== format || !Array.isArray(data.observations) || data.observations.length > 1000) throw new Error('Arquivo de histórico inválido.');
-        if (typeof data.tenantId !== 'string' || data.tenantId.toLowerCase() !== tenantId) throw new Error('Este arquivo pertence a outro tenant.');
-        const imported = data.observations.map((d) => {
-          const date = scoreStamp(d?.date);
-          if (!date || date.slice(0, 10) > end || !Number.isSafeInteger(d.current) || !Number.isSafeInteger(d.max) || scorePercent(d) == null) throw new Error('Arquivo de histórico inválido.');
-          return { date, current: d.current, max: d.max };
-        });
+        if (files.length > 24 || files.reduce((total, f) => total + f.size, 0) > 4 * 1024 * 1024) throw new Error('Selecione até 24 arquivos por vez, somando até 4 MB.');
+        const imported = [];
+        for (const file of files) imported.push(...await read(file));
         const previous = App.params.identityArchive?.tenantId === tenantId ? App.params.identityArchive.days : [];
         const days = scoreCalendar([], [...previous, ...imported], end, 24).daily;
         App.params.identityArchive = { tenantId, days };
@@ -3062,7 +3225,7 @@
       const a = h('a', { href: url, download: 'identity-score-' + end + '.json' });
       document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
     };
-    return h('details', { class: 'score-archive' }, h('summary', null, 'Histórico em arquivo local'), h('p', null, 'Guarde a coleta em JSON e importe o arquivo em uma consulta futura para reunir até 24 meses. A importação é processada nesta aba. O arquivo contém o ID do tenant, datas e pontos.'),
+    return h('details', { class: 'score-archive' }, h('summary', null, 'Histórico em arquivo local'), h('p', null, 'Selecione um ou mais arquivos JSON de histórico deste tenant. O portal reúne os dias válidos dos últimos 24 meses nesta aba. Você pode salvar o resultado em um único arquivo.'),
       h('div', { class: 'actions' }, h('button', { class: 'btn sm', type: 'button', onclick: save }, 'Salvar histórico em JSON'), h('label', null, h('span', null, 'Importar arquivo de histórico'), picker)), notice);
   }
 
@@ -3077,6 +3240,13 @@
       if (!status) return;
       if (status.enabled) {
         content.append(h('p', { class: 'muted small' }, status.collectedAt ? raw(t('Última consulta ao Graph: {date} UTC.', { date: status.collectedAt.slice(0, 19).replace('T', ' ') })) : 'Aguardando a primeira consulta ao Graph.'));
+      }
+      if (status.scheduled) {
+        const scheduleText = { waiting: 'Coleta diária aguardando o WP-Cron.', complete: 'Última coleta diária concluída.',
+          empty: 'A última coleta diária não encontrou medições válidas.',
+          paging: 'O WP-Cron está lendo as próximas páginas do Graph.', retry: 'O portal tentará a coleta diária novamente.',
+          access: 'O Graph recusou a coleta diária. Verifique a permissão de aplicativo no tenant.' };
+        content.append(h('p', { class: 'small' }, scheduleText[status.scheduleState] || 'Coleta diária aguardando o WP-Cron.'));
       }
       if (!App.me.user?.can?.manageAccess) {
         content.append(h('p', { class: 'muted small' }, 'O administrador global ou de funções privilegiadas do tenant pode alterar o histórico.'));
@@ -3097,6 +3267,22 @@
         finally { button.disabled = false; }
       };
       content.append(button);
+      if (status.enabled && (status.scheduleAvailable || status.scheduled)) {
+        const scheduler = h('button', { type: 'button', class: 'btn sm' }, status.scheduled ? 'Pausar coleta diária' : 'Autorizar coleta diária');
+        scheduler.onclick = async () => {
+          scheduler.disabled = true;
+          try {
+            const updated = await api(path, { method: 'PATCH', body: { scheduled: !status.scheduled } });
+            status = { ...status, ...updated };
+            const existing = App.cache['identityscore{}']?.tracking;
+            if (existing) Object.assign(existing, updated);
+            notice.textContent = '';
+            paint();
+          } catch (err) { notice.textContent = t(err.message); }
+          finally { scheduler.disabled = false; }
+        };
+        content.append(h('p', { class: 'muted small' }, 'A coleta diária usa o aplicativo já autorizado neste tenant. O WordPress consulta o Graph pelo WP-Cron mesmo sem usuários conectados.'), scheduler);
+      }
     }
     if (!initial) details.ontoggle = async () => {
       if (!details.open || status) return;
@@ -3110,7 +3296,7 @@
   const identityScoreReport = () => reportPanel('identityscore', {}, 'Microsoft Entra Identity Score', (p, ctx) => {
     const box = h('div'), body = h('div'), dailyTable = h('div'), tenantId = String(App.me.tenant.id || '').toLowerCase();
     const end = scoreUtcDay(p._meta?.generated_at) || new Date().toISOString().slice(0, 10);
-    const selector = h('select', { class: 'j365-input', 'aria-label': 'Período do histórico' }, ...[3, 6, 12, 24].map((n) => h('option', { value: n, selected: (App.params.identityMonths || 12) === n }, t('{n} meses', { n }))));
+    const selector = h('select', { class: 'j365-input', 'aria-label': 'Período do histórico' }, ...[3, 6, 12, 24].map((n) => h('option', { value: n, selected: (App.params.identityMonths || 24) === n }, t('{n} meses', { n }))));
     const monthTitle = 'Fechamento mensal', title = 'Mês (UTC)', scoreTitle = 'Identity Score (%)';
     const columns = [
       { key: 'date', label: 'Data da medição (UTC)', render: (r) => fmtDay(r.date.slice(0, 10)), export: (r) => r.date.slice(0, 10) },
@@ -3118,6 +3304,8 @@
       { key: 'percent', label: scoreTitle, render: (r) => scorePercentText(r.percent) },
       { key: 'source', label: 'Origem da medição', value: (r) => r.source ? t(r.source) : '' },
     ];
+    const archivePanel = tenantId ? scoreArchiveControls(tenantId, p.history || [], end, draw, p.tracking?.months || []) : null;
+    const sourceTable = h('div');
     function draw() {
       const archive = App.params.identityArchive?.tenantId === tenantId ? App.params.identityArchive.days : [];
       const count = Number(selector.value), info = scoreCalendar(p.history || [], archive, end, count, p.tracking?.months || []);
@@ -3129,14 +3317,22 @@
       ]));
       const origin = latest && latest.source !== 'Microsoft Graph' ? ' · ' + t(latest.source) : '';
       ctx.setRing(latest ? { pct: latest.percent, pctText: scorePercentText(latest.percent), label: 'Identity Score', caption: t('{a} de {b} pontos', { a: num(latest.current), b: num(latest.max) }) + ' · ' + fmtDay(latest.date.slice(0, 10)) + ' UTC' + origin, tone: toneFor(latest.percent, 70, 50) } : null);
-      body.append(monthlyScoreChart(info.months), h('p', { class: 'muted small score-coverage' }, raw(coverage + ' ' + t('Cada mês usa a última medição válida em UTC. O Graph pode fornecer um histórico mais curto que o período selecionado.'))));
+      const scope = t('Janela de {start} a {end} (UTC).', { start: info.months[0].month, end: info.months.at(-1).month });
+      const direct = info.sources[0];
+      const observed = direct.days ? t('Medições do Graph de {start} a {end} (UTC).', { start: fmtDay(direct.first), end: fmtDay(direct.last) }) : t('A consulta ao Graph não retornou uma medição válida nesse período.');
+      body.append(monthlyScoreChart(info.months), h('div', { class: 'score-coverage' }, h('p', { class: 'muted small' }, raw(scope + ' ' + coverage + ' ' + observed)),
+        covered.length < count && archivePanel ? h('button', { type: 'button', class: 'btn sm', onclick: () => { archivePanel.open = true; archivePanel.querySelector('input').focus(); } }, 'Complementar com arquivos anteriores') : null));
       body.append(h('h3', null, monthTitle), DataTable({ rows: [...info.months].reverse(), name: 'identity-score-monthly', sheet: monthTitle, columns: [{ key: 'month', label: title }, ...columns, { key: 'samples', label: 'Dias com medição' }] }));
+      const coverageColumns = [{ key: 'source', label: 'Origem da medição', value: r => t(r.source) },
+        { key: 'first', label: 'Primeira medição (UTC)', render: r => fmtDay(r.first) }, { key: 'last', label: 'Última medição (UTC)', render: r => fmtDay(r.last) },
+        { key: 'days', label: 'Dias com medição' }, { key: 'observed', label: 'Meses observados' }, { key: 'closings', label: 'Fechamentos usados' }];
+      sourceTable.replaceChildren(DataTable({ rows: info.sources, sheet: 'Cobertura por origem', name: 'identity-score-sources', columns: coverageColumns }));
       dailyTable.replaceChildren(DataTable({ rows: info.daily, name: 'identity-score-history', sheet: 'Histórico da pontuação', columns }));
     }
     selector.onchange = () => { App.params.identityMonths = Number(selector.value); draw(); };
     box.append(h('div', { class: 'score-controls' }, h('label', null, 'Período do histórico', selector),
       tenantId ? scoreTrackingControls(p.tracking, () => App.go('identityscore')) : null,
-      tenantId ? scoreArchiveControls(tenantId, p.history || [], end, draw, p.tracking?.months || []) : null), body);
+      archivePanel), body, h('details', { class: 'score-archive' }, h('summary', null, 'Cobertura por origem'), h('p', null, 'Primeira e última medição válida no período. Um mesmo dia pode existir em mais de uma origem. Cada mês tem no máximo um fechamento.'), sourceTable));
     draw();
     const status = { active: 'Ativa', completedBySystem: 'Concluído pelo sistema', completedByUser: 'Concluído pelo usuário', dismissed: 'Descartada', postponed: 'Adiada', riskAccepted: 'Risco aceito', planned: 'Planejada', thirdParty: 'Resolvido por terceiro', alternateMitigation: 'Mitigação alternativa' };
     const priority = { high: 'Alta', medium: 'Média', low: 'Baixa' };
@@ -4133,6 +4329,9 @@
       // The server sorts and bounds these IDs; an older tab entry may use the original order.
       App.cache[type + JSON.stringify(params)] = payload;
       modal(t('Dispositivos com o app'), appDevicesPanel(params.ids, params.name));
+    } else if (type === 'devicescore' && params.section === 'devices') {
+      App.cache[type + JSON.stringify(params)] = payload;
+      modal(t('Pontuações por dispositivo'), deviceScoreInventory());
     } else if (type === 'device_compliance') {
       App.cache[type + JSON.stringify(params)] = payload;
       modal(params.name || params.id, compliancePanel(params));
@@ -4191,7 +4390,7 @@
       local.replaceChildren(...results.map((p) => {
         const m = p._meta, params = m.params || {};
         const suffix = m.report === 'usage' ? params.period : m.report === 'app_devices' || m.report === 'device_compliance' || APP_REPORT_TITLES[m.report] ? params.name : '';
-        const title = reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
+        const title = m.report === 'devicescore' && params.section === 'devices' ? t('Pontuações por dispositivo') : reportLabel(m.report) + (suffix ? ' · ' + suffix : '');
         return row(title, h('small', null, raw(fmtDate(m.generated_at))), button('Abrir relatório', () => openSessionReport(p)));
       }));
       localCount.textContent = num(results.length);

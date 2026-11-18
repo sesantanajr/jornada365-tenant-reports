@@ -239,6 +239,12 @@ final class Rest_Api {
 			return $this->forbid_change( 'Somente um administrador global ou de funções privilegiadas pode alterar o histórico do tenant.' );
 		}
 		$args = $request->get_json_params();
+		if ( is_array( $args ) && [ 'scheduled' ] === array_keys( $args ) && is_bool( $args['scheduled'] ) ) {
+			if ( ! Identity_Score_Schedule::change( $s['tenant_id'], $args['scheduled'] ) ) {
+				return $this->forbid_change( 'O agendamento requer histórico ativo e permissão de aplicativo para ler as recomendações neste tenant.' );
+			}
+			return $this->identity_history_status();
+		}
 		if ( ! is_array( $args ) || [ 'enabled' ] !== array_keys( $args ) || ! is_bool( $args['enabled'] ) ) {
 			return new WP_Error( 'j365_history_input', 'Opção de histórico inválida.', [ 'status' => 400 ] );
 		}

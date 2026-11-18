@@ -125,7 +125,7 @@ final class Admin_Ui {
 						</fieldset></td></tr>
 					<tr id="j365-report-modules"><th scope="row">Módulos de relatório</th>
 						<td><fieldset>
-							<p class="description">Relatórios base (sempre ativos): Visão geral, Identidade, MFA, Dispositivos, Aplicativos, Acesso Condicional, Grupos, Licenciamento, Convidados, Domínios, Políticas de autenticação.</p>
+							<p class="description">Relatórios base (sempre ativos): Visão geral, Identidade, MFA, Dispositivos, Score dos dispositivos, Aplicativos, Acesso Condicional, Grupos, Licenciamento, Convidados, Domínios, Políticas de autenticação.</p>
 							<?php foreach ( Settings::MODULES as $key => $mod ) : ?>
 								<label style="display:block;margin:4px 0"><input type="checkbox" name="<?php echo esc_attr( Settings::OPTION ); ?>[enabled_modules][]" value="<?php echo esc_attr( $key ); ?>" <?php checked( in_array( $key, $s['enabled_modules'], true ) ); ?>> <strong><?php echo esc_html( $mod['label'] ); ?></strong> — <?php echo esc_html( $mod['note'] ); ?> <code style="font-size:11px"><?php echo esc_html( implode( ', ', $mod['permissions'] ) ); ?></code><?php foreach ( (array) ( $mod['delegated'] ?? [] ) as $res => $scopes ) : ?> <code style="font-size:11px;background:#fff4e5">delegada (<?php echo esc_html( 'exchange' === $res ? 'Exchange Online' : 'Graph' ); ?>): <?php echo esc_html( implode( ', ', (array) $scopes ) ); ?></code><?php endforeach; ?></label>
 							<?php endforeach; ?>

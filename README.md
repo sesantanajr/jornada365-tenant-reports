@@ -22,6 +22,8 @@ For the logo beside the company name, open **Settings** in the signed-in portal.
 
 ### What you can manage
 
+**Device experience.** Open **Devices & apps → Device experience score** for the Intune Endpoint Analytics score (0–100), category scores and comparison baselines. Open the device list to find individual machines with poor scores or insufficient data. [Device experience guide and screenshot](docs/device-experience-score.md)
+
 | Area | What the portal helps you do |
 | --- | --- |
 | Identity and security | Review users, guests, inactive accounts, MFA, privileged roles, Conditional Access and Secure Score. |
@@ -44,7 +46,7 @@ For the logo beside the company name, open **Settings** in the signed-in portal.
 
 *Groups report in English. The Brazilian Portuguese screenshot below uses the same 40 fictional groups.*
 
-In **Security → Identity Score → Portal history**, a tenant administrator can opt in to retain the latest measured score for each of 24 UTC calendar months. Generating the report collects available Graph observations. Months without a measurement remain empty. The Excel export identifies each source. Local JSON files can also extend the timeline. [History, access, erasure and unattended collection](docs/identity-score-history.md#english)
+Identity Score opens on 24 months and groups consecutive missing months on the chart. **Coverage by source** shows the first and last valid measurements and how many closings each source supplied. In **Security → Identity Score → Portal history**, a tenant administrator can opt in to retain the latest measured score for each of 24 UTC calendar months. Generating the report collects available Graph observations. Months without a measurement remain empty. The Excel export identifies each source. Select **Add earlier history files** to combine existing archives. Operators using an authorized multi-tenant app can offer daily WP-Cron collection with a separate tenant opt-in. [History, access, erasure and unattended collection](docs/identity-score-history.md#english)
 
 ![Monthly Identity Score, measurement coverage and exact points in a fictional Microsoft Entra tenant.](docs/assets/identity-score-en.webp)
 
@@ -82,6 +84,8 @@ Para verificar a imagem ao lado do nome da empresa, entre no portal e abra **Con
 
 ### O que você pode gerenciar
 
+**Experiência dos dispositivos.** Abra **Dispositivos & apps → Score dos dispositivos** para consultar a pontuação do Intune Endpoint Analytics (0–100), as categorias e as referências de comparação. Abra a lista de dispositivos para identificar máquinas com pontuação baixa ou dados insuficientes. [Guia e captura em português](docs/device-experience-score.md#português-do-brasil)
+
 | Área | O que o portal permite fazer |
 | --- | --- |
 | Identidade e segurança | Revisar usuários, convidados, contas inativas, MFA, funções privilegiadas, Acesso Condicional e Secure Score. |
@@ -104,7 +108,7 @@ Para verificar a imagem ao lado do nome da empresa, entre no portal e abra **Con
 
 *Relatório de Grupos em português brasileiro. São os mesmos 40 grupos fictícios da captura em inglês.*
 
-Em **Segurança → Identity Score → Histórico do portal**, um administrador do tenant pode autorizar a retenção da última medição de cada mês em uma janela de 24 meses UTC. O portal consulta o Graph ao gerar o relatório. Os meses sem medição ficam em branco e o Excel identifica a origem de cada fechamento. Arquivos JSON locais também podem complementar o período. [Histórico, acesso, exclusão e coleta agendada](docs/identity-score-history.md#português)
+O Identity Score abre em 24 meses e agrupa os meses consecutivos sem dados no gráfico. **Cobertura por origem** identifica a primeira e a última medição válida e quantos fechamentos cada fonte forneceu. Em **Segurança → Identity Score → Histórico do portal**, um administrador do tenant pode autorizar a retenção da última medição de cada mês em uma janela de 24 meses UTC. O portal consulta o Graph ao gerar o relatório. Os meses sem medição ficam em branco e o Excel identifica a origem de cada fechamento. Selecione **Complementar com arquivos anteriores** para reunir históricos existentes. Empresas que usam o aplicativo multitenant autorizado podem habilitar a coleta diária pelo WP-Cron por meio de uma autorização separada. [Histórico, acesso, exclusão e coleta agendada](docs/identity-score-history.md#português)
 
 ![Evolução mensal do Identity Score, cobertura das medições e pontos exatos em um tenant fictício do Microsoft Entra.](docs/assets/identity-score-pt-br.webp)
 

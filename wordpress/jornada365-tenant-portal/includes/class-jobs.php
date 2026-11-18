@@ -33,6 +33,7 @@ final class Jobs {
 			'mfa'          => Reports\Mfa::class,
 			'devices'      => Reports\Devices::class,
 			'device_compliance' => Reports\Device_Compliance::class,
+			'devicescore'       => Reports\Device_Score::class,
 			'apps'         => Reports\Apps::class,
 			'app_devices'  => Reports\App_Devices::class,
 			'managed_apps' => Reports\Managed_Apps::class,

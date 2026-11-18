@@ -2,6 +2,16 @@
 
 Uma empresa pode instalar o Tenant Jornada365 no próprio WordPress e usar seu diretório Microsoft Entra. O login corporativo é opcional. A configuração padrão continua usando o e-mail para localizar o tenant de cada organização.
 
+Na página pública, informe o e-mail corporativo e selecione **Continuar com a Microsoft**. Se a empresa fixou um diretório em **Login corporativo**, basta selecionar o botão configurado pela empresa. Quando o diretório ainda precisa ser conectado, a página fornece um link para encaminhar ao administrador.
+
+![Página pública em português com o campo de e-mail corporativo e o botão Continuar com a Microsoft](assets/public-entry-pt-br.webp)
+
+### Portal sign-in · English
+
+On a shared installation, enter your work email and select **Continue with Microsoft**. A company installation with a configured directory offers a direct sign-in button. If your directory hasn’t been connected yet, the page provides a link you can send to its administrator.
+
+![Public portal in English with the work email field and Continue with Microsoft button](assets/public-entry-en.webp)
+
 ## Logotipo da empresa no portal
 
 O logotipo exibido na barra superior do Microsoft 365 pertence ao **tema da organização**, configurado no centro de administração do Microsoft 365. A marca da **página de entrada do Entra** tem configuração própria e é a fonte que o portal consulta. Se a imagem existir somente no tema do Microsoft 365, configure-a também no Entra ou envie uma alternativa nas configurações deste portal. [Tema da organização no Microsoft 365](https://learn.microsoft.com/pt-br/microsoft-365/admin/setup/customize-your-organization-theme?view=o365-worldwide)

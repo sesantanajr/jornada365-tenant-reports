@@ -145,7 +145,7 @@ final class Settings {
 		'Directory.Read.All'                      => [ 'overview', 'identity', 'groups', 'licensing', 'guests', 'domains' ],
 		'AuditLog.Read.All'                       => [ 'inactive', 'mfa' ],
 		'Policy.Read.All'                         => [ 'ca', 'authpolicies' ],
-		'DeviceManagementManagedDevices.Read.All' => [ 'apps', 'app_devices' ],
+		'DeviceManagementManagedDevices.Read.All' => [ 'apps', 'app_devices', 'devicescore' ],
 		'DeviceManagementApps.Read.All'           => [ 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures' ],
 		'RoleManagement.Read.All'                 => [ 'privileged' ],
 		'IdentityRiskyUser.Read.All'              => [],
@@ -180,7 +180,7 @@ final class Settings {
 	}
 
 	/** Reports available with the base permissions (always on). */
-	public const BASE_REPORTS = [ 'overview', 'identity', 'mfa', 'devices', 'apps', 'app_devices', 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures', 'ca', 'groups', 'licensing', 'guests', 'domains', 'authpolicies' ];
+	public const BASE_REPORTS = [ 'overview', 'identity', 'mfa', 'devices', 'devicescore', 'apps', 'app_devices', 'managed_apps', 'intune_assignments', 'app_assignments', 'app_failures', 'ca', 'groups', 'licensing', 'guests', 'domains', 'authpolicies' ];
 
 	public static function enabled_modules(): array {
 		$m = self::get( 'enabled_modules', array_keys( self::MODULES ) );
@@ -217,7 +217,7 @@ final class Settings {
 		'Directory.Read.All'                      => 'Usuários, grupos, dispositivos, licenças, domínios, funções e consentimentos do diretório',
 		'AuditLog.Read.All'                       => 'Último login das contas (inatividade) e registro de métodos de MFA',
 		'Policy.Read.All'                         => 'Acesso Condicional, Security Defaults e políticas de autenticação',
-		'DeviceManagementManagedDevices.Read.All' => 'Dispositivos do Intune, conformidade e inventário de aplicativos instalados',
+		'DeviceManagementManagedDevices.Read.All' => 'Dispositivos do Intune, conformidade, pontuação de experiência e inventário de aplicativos instalados',
 		'DeviceManagementApps.Read.All'           => 'Catálogo, atribuições e falhas de instalação de aplicativos do Intune',
 		'RoleManagement.Read.All'                 => 'Atribuições de funções administrativas e PIM',
 		'IdentityRiskyUser.Read.All'              => 'Usuários de risco (Identity Protection)',

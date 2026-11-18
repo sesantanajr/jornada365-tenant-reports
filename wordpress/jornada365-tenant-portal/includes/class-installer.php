@@ -34,6 +34,7 @@ final class Installer {
 
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( 'j365tp_hourly_maintenance' );
+		wp_clear_scheduled_hook( 'j365tp_identity_score_work' );
 		flush_rewrite_rules();
 	}
 
@@ -165,7 +166,12 @@ final class Installer {
 			months TEXT NOT NULL,
 			oldest CHAR(7) NOT NULL DEFAULT '',
 			collected_at CHAR(20) NOT NULL DEFAULT '',
+			schedule_key CHAR(36) NOT NULL DEFAULT '',
+			schedule_due BIGINT UNSIGNED NOT NULL DEFAULT 0,
+			schedule_state VARCHAR(16) NOT NULL DEFAULT '',
+			schedule_cursor TEXT NULL,
 			PRIMARY KEY  (tenant_id),
+			KEY schedule_due (schedule_due),
 			KEY oldest (oldest)
 		) {$charset};";
 

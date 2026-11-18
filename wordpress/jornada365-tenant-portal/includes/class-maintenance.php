@@ -12,12 +12,14 @@ final class Maintenance {
 
 	public function register(): void {
 		add_action( 'j365tp_hourly_maintenance', [ $this, 'run' ] );
+		add_action( 'j365tp_identity_score_work', [ Identity_Score_Schedule::class, 'run' ] );
 		add_action( 'j365tp_brand_refresh', [ Brand::class, 'refresh_from_url' ] );
 	}
 
 	public function run(): void {
 		Jobs::purge_old();
 		Identity_History::purge_expired();
+		Identity_Score_Schedule::run();
 		Audit::purge();
 
 		// Brand assets missing (e.g. the logo host was unreachable at upgrade time): retry.
