@@ -128,13 +128,17 @@ final class Jobs {
 			throw new Graph_Exception( 'Há várias consultas em andamento. Aguarde a conclusão e tente novamente.', 429, 'job_capacity' );
 		}
 		$now = gmdate( 'Y-m-d H:i:s' );
+		$initial = $report->initial_state( $params );
+		if ( 'identityscore' === $type && ! $action ) {
+			$initial['_historyGeneration'] = Identity_History::generation( $session['tenant_id'] );
+		}
 		$row = [
 			'job_id'     => $job_id,
 			'tenant_id'  => strtolower( $session['tenant_id'] ),
 			'user_oid'   => $session['owner'],
 			'job_type'   => $type,
 			'params'     => null,
-			'state'      => self::seal( [ 'params' => $params, 'state' => $report->initial_state( $params ) ], $session['data_key'] ),
+			'state'      => self::seal( [ 'params' => $params, 'state' => $initial ], $session['data_key'] ),
 			'status'     => 'pending',
 			'progress'   => 0,
 			'total'      => 0,
@@ -352,6 +356,12 @@ final class Jobs {
 
 			if ( ! empty( $result['done'] ) ) {
 				$payload          = $report->finalize( $state, $params );
+				if ( 'identityscore' === $row['job_type'] ) {
+					$payload['_historyGeneration'] = $state['_historyGeneration'] ?? '';
+					if ( ! Identity_History::collect( $session['tenant_id'], $payload['_historyGeneration'], $payload['history'] ) ) {
+						$state['_warnings'][] = 'Não foi possível salvar o fechamento mensal. Atualize o relatório para tentar novamente.';
+					}
+				}
 				$payload['_meta'] = array_merge(
 					$payload['_meta'] ?? [],
 					[
@@ -454,7 +464,17 @@ final class Jobs {
 			'job_id' => $job_id, 'tenant_id' => strtolower( $session['tenant_id'] ), 'user_oid' => $session['owner'], 'status' => 'done',
 		] );
 		// Only one tab wins collection, including a race with an explicit discard.
-		return 1 === $deleted && is_array( $box['result'] ?? null ) ? $box['result'] : null;
+		if ( 1 !== $deleted || ! is_array( $box['result'] ?? null ) ) {
+			return null;
+		}
+		if ( 'identityscore' === $row['job_type'] ) {
+			$generation = $box['result']['_historyGeneration'] ?? '';
+			unset( $box['result']['_historyGeneration'] );
+			if ( in_array( 'identityscore', Settings::active_reports(), true ) ) {
+				$box['result']['tracking'] = Identity_History::status( $session['tenant_id'], $generation );
+			}
+		}
+		return $box['result'];
 	}
 
 	/** Deletes every job older than the TTL (abandoned tabs, expired sessions). */

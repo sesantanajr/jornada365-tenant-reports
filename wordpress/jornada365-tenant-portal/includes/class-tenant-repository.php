@@ -64,6 +64,7 @@ final class Tenant_Repository {
 	public static function set_status( string $tenant_id, string $status ): void {
 		self::upsert( $tenant_id, [ 'status' => $status ] );
 		if ( 'active' !== $status ) {
+			Identity_History::disable( $tenant_id );
 			Session::destroy_for_tenant( $tenant_id );
 			Token_Service::forget( $tenant_id );
 		}
@@ -72,8 +73,9 @@ final class Tenant_Repository {
 	public static function delete( string $tenant_id ): void {
 		global $wpdb;
 		$tenant_id = strtolower( $tenant_id );
+		Tenant_Logo::forget( $tenant_id );
 		Token_Service::forget( $tenant_id );
-		foreach ( [ 'tenants', 'jobs', 'app_allowlist' ] as $t ) {
+		foreach ( [ 'tenants', 'jobs', 'app_allowlist', 'identity_history' ] as $t ) {
 			$wpdb->delete( Installer::table( $t ), [ 'tenant_id' => $tenant_id ] );
 		}
 	}

@@ -17,6 +17,7 @@ final class Maintenance {
 
 	public function run(): void {
 		Jobs::purge_old();
+		Identity_History::purge_expired();
 		Audit::purge();
 
 		// Brand assets missing (e.g. the logo host was unreachable at upgrade time): retry.

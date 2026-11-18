@@ -157,6 +157,18 @@ final class Installer {
 
 		$sql = [];
 
+		$history = self::table( 'identity_history' );
+		$sql[] = "CREATE TABLE {$history} (
+			tenant_id CHAR(36) NOT NULL,
+			generation CHAR(36) NOT NULL,
+			revision CHAR(36) NOT NULL,
+			months TEXT NOT NULL,
+			oldest CHAR(7) NOT NULL DEFAULT '',
+			collected_at CHAR(20) NOT NULL DEFAULT '',
+			PRIMARY KEY  (tenant_id),
+			KEY oldest (oldest)
+		) {$charset};";
+
 		$sql[] = "CREATE TABLE {$tenants} (
 			tenant_id CHAR(36) NOT NULL,
 			display_name VARCHAR(255) NOT NULL DEFAULT '',

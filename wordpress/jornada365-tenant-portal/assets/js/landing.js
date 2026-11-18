@@ -263,18 +263,19 @@
   }
 
   function faq() {
+    const storageAnswer = t('O WordPress guarda o vínculo do tenant e as configurações. A auditoria pseudonimizada segue a retenção definida pelo operador. Durante a geração, o portal guarda o progresso e o resultado cifrados. Ele remove o resultado ao entregá-lo ao navegador e limpa trabalhos inativos periodicamente.') + ' ' + t('O histórico opcional do Identity Score mantém até 24 fechamentos mensais por tenant.');
     const qa = PER ? [
       ['Preciso instalar alguma coisa?', 'Não. Um administrador conecta o tenant pelo portal e o aplicativo Tenant Jornada365 é criado dentro do próprio tenant, sem script.'],
       ['Quem pode conectar?', 'Global Administrator, Cloud Application Administrator ou Application Administrator do seu tenant, uma única vez.'],
       ['Depende do tenant de outra empresa?', 'O aplicativo usado para entrar pertence ao diretório da sua empresa. O WordPress mantém o vínculo entre o tenant e esse aplicativo.'],
       ['Quais licenças são necessárias?', 'Atividade de login e Acesso Condicional exigem Entra ID P1; risco exige P2; dispositivos e aplicativos exigem Intune. O portal avisa quando algo não estiver disponível.'],
-      ['O que fica salvo no servidor?', 'O WordPress guarda o vínculo do tenant e as configurações. A auditoria pseudonimizada segue a retenção definida pelo operador. Durante a geração, o portal guarda o progresso e o resultado cifrados. Ele remove o resultado ao entregá-lo ao navegador e limpa trabalhos inativos periodicamente.'],
+      ['O que fica salvo no servidor?', storageAnswer],
       ['Como removo o acesso?', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.'],
     ] : [
       ['Preciso instalar alguma coisa?', 'Não. O administrador aprova o Tenant Jornada365 na tela da Microsoft e o aplicativo empresarial é criado automaticamente no tenant.'],
       ['Quem pode aprovar?', 'Um Global Administrator ou Privileged Role Administrator do seu tenant, uma única vez.'],
       ['Quais licenças são necessárias?', 'Atividade de login e Acesso Condicional exigem Entra ID P1; risco exige P2; dispositivos e aplicativos exigem Intune. O portal avisa quando algo não estiver disponível.'],
-      ['O que fica salvo no servidor?', 'O WordPress guarda o vínculo do tenant e as configurações. A auditoria pseudonimizada segue a retenção definida pelo operador. Durante a geração, o portal guarda o progresso e o resultado cifrados. Ele remove o resultado ao entregá-lo ao navegador e limpa trabalhos inativos periodicamente.'],
+      ['O que fica salvo no servidor?', storageAnswer],
       ['Como removo o acesso?', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.'],
     ];
     return h('div', { class: 'faq-wrap' },

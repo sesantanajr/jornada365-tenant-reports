@@ -4,7 +4,7 @@ Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.5.0
+Stable tag: 1.6.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
@@ -15,7 +15,7 @@ O serviço da Jornada 365 está disponível gratuitamente para todos em [tenant.
 
 Um administrador com função de registro e consentimento conecta a empresa pelo portal. O aplicativo de página única é registrado no diretório da empresa. Os relatórios usam as permissões delegadas de leitura da conta que entra. Os módulos de ação habilitados requerem permissões adicionais. O portal oferece relatórios de identidade, MFA, contas inativas, dispositivos (híbridos, cloud-only, obsoletos, suporte do SO, filtro por plataforma), aplicativos e versões (com homologação), Acesso Condicional, grupos, licenciamento & custo, colaboração externa (convidados), domínios, políticas de autenticação, acessos privilegiados (PIM), risco (Identity Protection), consentimentos/credenciais de apps, Secure Score, uso do M365, caixas de correio (cotas e arquivamento) e OneDrive/SharePoint (limites e Top N).
 
-Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft): ações remotas do Intune (sincronizar, reiniciar, verificação e atualização do Microsoft Defender), arquivamento de caixas (ativar ou desativar o arquivo morto, expansão automática e sincronização imediata) e exibição dos nomes nos relatórios de uso. Exportação Excel nativa com resumo executivo, gráficos e tabelas filtráveis, gerada no navegador. O WordPress guarda configurações, auditoria limitada e estado temporário dos relatórios em processamento.
+Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft): ações remotas do Intune (sincronizar, reiniciar, verificação e atualização do Microsoft Defender), arquivamento de caixas (ativar ou desativar o arquivo morto, expansão automática e sincronização imediata) e exibição dos nomes nos relatórios de uso. Exportação Excel nativa com resumo executivo, gráficos e tabelas filtráveis, gerada no navegador. O WordPress guarda configurações, auditoria limitada e estado temporário dos relatórios em processamento. Se o tenant optar, também armazena a imagem alternativa da organização e os fechamentos mensais do Identity Score por até 24 meses.
 
 == Installation ==
 1. Baixe jornada365-tenant-portal.zip nos [lançamentos do projeto](https://github.com/sesantanajr/jornada365-tenant-reports/releases). No WordPress, abra Plugins → Adicionar plugin → Enviar plugin, selecione o ZIP e ative.
@@ -27,6 +27,21 @@ Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft):
 O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
 
 == Changelog ==
+= 1.6.0 =
+English
+
+* Overview charts compare directory accounts, Conditional Access policy states and the most assigned paid licenses. Open the underlying report or check source availability and collection times.
+* The tenant header checks Microsoft Entra branding by locale. Settings shows its source and lets an authorized tenant administrator set a private fallback image.
+* Organizations can opt in to retain actual monthly Identity Score measurements for 24 months. Each authorized report collects the available observations. A separate company-run collector supports unattended collection.
+* Report headers, tables and charts use a quieter palette. Storage figures use the same type and baseline as counts. Mailbox quota indicators now filter the matching mailboxes by exact quota state.
+
+Português do Brasil
+
+* A Visão geral compara contas do diretório, políticas de Acesso Condicional e produtos pagos com mais atribuições. Cada gráfico dá acesso ao relatório, com horários e disponibilidade das fontes.
+* O cabeçalho consulta a marca do Entra no idioma da sessão. Em Configurações é possível conferir sua origem e cadastrar uma imagem alternativa como administrador autorizado do tenant.
+* Cada empresa pode ativar a retenção de medições mensais reais do Identity Score por até 24 meses. A coleta ocorre ao gerar o relatório. Um coletor separado permite agendamento pela empresa.
+* Os relatórios têm uma nova paleta e escala tipográfica consistente. Volumes de armazenamento e contagens ficam alinhados. Os indicadores de cota abrem as caixas de correio correspondentes ao estado selecionado.
+
 = 1.5.0 =
 English
 

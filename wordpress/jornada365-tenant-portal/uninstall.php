@@ -7,7 +7,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 }
 
 global $wpdb;
-foreach ( [ 'tenants', 'sessions', 'jobs', 'cache', 'app_allowlist', 'audit' ] as $t ) {
+foreach ( [ 'tenants', 'sessions', 'jobs', 'cache', 'app_allowlist', 'audit', 'identity_history' ] as $t ) {
 	$wpdb->query( 'DROP TABLE IF EXISTS ' . $wpdb->prefix . 'j365_' . $t ); // phpcs:ignore WordPress.DB.PreparedSQL
 }
 delete_option( 'j365tp_settings' );
@@ -17,3 +17,4 @@ foreach ( [ 'j365tp_credential', 'j365tp_brand', 'j365tp_settings_rev', 'j365tp_
 }
 $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_j365tp_%' OR option_name LIKE '_transient_timeout_j365tp_%'" );
 wp_clear_scheduled_hook( 'j365tp_hourly_maintenance' );
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like( 'j365tp_brand_' ) . '%' ) );

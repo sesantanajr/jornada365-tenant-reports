@@ -39,7 +39,10 @@ final class Rest_Api {
 		$change = [ $this, 'authorize_change' ];
 
 		register_rest_route( self::NS, '/me', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'me' ], 'permission_callback' => $auth ] );
-		register_rest_route( self::NS, '/tenant/logo', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'tenant_logo' ], 'permission_callback' => $auth ] );
+		register_rest_route( self::NS, '/tenant/logo', [
+			[ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'tenant_logo' ], 'permission_callback' => $auth ],
+			[ 'methods' => [ 'POST', 'DELETE' ], 'callback' => [ $this, 'configure_tenant_logo' ], 'permission_callback' => $change ],
+		] );
 		register_rest_route( self::NS, '/reports/(?P<type>[a-z_]+)', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'start_report' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/jobs/(?P<id>[0-9a-f-]{36})/run', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'run_job' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/jobs', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'list_report_jobs' ], 'permission_callback' => $auth ] );
@@ -51,6 +54,10 @@ final class Rest_Api {
 		] );
 		register_rest_route( self::NS, '/allowlist/(?P<id>\d+)', [ 'methods' => WP_REST_Server::DELETABLE, 'callback' => [ $this, 'allowlist_delete' ], 'permission_callback' => $change ] );
 		register_rest_route( self::NS, '/tenant/settings', [ 'methods' => 'PATCH', 'callback' => [ $this, 'tenant_settings' ], 'permission_callback' => $change ] );
+		register_rest_route( self::NS, '/tenant/identity-score-history', [
+			[ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'identity_history_status' ], 'permission_callback' => $auth ],
+			[ 'methods' => 'PATCH', 'callback' => [ $this, 'identity_history_change' ], 'permission_callback' => $change ],
+		] );
 		register_rest_route( self::NS, '/cache/clear', [ 'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'cache_clear' ], 'permission_callback' => $auth ] );
 		register_rest_route( self::NS, '/audit', [ 'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'audit' ], 'permission_callback' => $auth ] );
 		// Actions (delegated, run as the signed-in admin): roles re-verified live before every start.
@@ -144,6 +151,7 @@ final class Rest_Api {
 
 	public static function capabilities( array $roles ): array {
 		return [
+			'manageBrand'     => self::has_role( $roles, self::MANAGE_BRAND_ROLES ),
 			'manageAccess'    => self::has_role( $roles, self::MANAGE_ACCESS_ROLES ),
 			'manageApps'      => self::has_role( $roles, self::MANAGE_APPS_ROLES ),
 			'updateTenantApp' => self::has_role( $roles, array_keys( Settings::CONNECT_ROLES ) ),
@@ -194,8 +202,54 @@ final class Rest_Api {
 		return new WP_Error( 'j365_error', $e->getMessage(), $data );
 	}
 
-	public function tenant_logo(): WP_REST_Response {
-		return new WP_REST_Response( [ 'logo' => Tenant_Logo::read( $this->session()['tenant_id'] ) ] );
+	private const MANAGE_BRAND_ROLES = [
+		'62e90394-69f5-4237-9190-012177145e10', // Global Administrator
+		'92ed04bf-c94a-4b82-9729-b799a7a4c178', // Organizational Branding Administrator
+	];
+
+	public function tenant_logo( WP_REST_Request $request ): WP_REST_Response {
+		return new WP_REST_Response( Tenant_Logo::resolve( $this->session()['tenant_id'], (string) $request->get_header( 'x-j365-lang' ) ) );
+	}
+
+	public function configure_tenant_logo( WP_REST_Request $request ) {
+		$s = $this->session();
+		if ( ! self::has_role( $s['roles'], self::MANAGE_BRAND_ROLES ) ) {
+			return $this->forbid_change( 'Somente administradores da marca ou administradores globais podem alterar o logotipo deste tenant.' );
+		}
+		$remove = 'DELETE' === $request->get_method();
+		if ( $remove ) {
+			Tenant_Logo::forget( $s['tenant_id'] );
+		} else {
+			$body = $request->get_json_params();
+			if ( ! is_string( $body['data'] ?? null ) || ! Tenant_Logo::configure( $s['tenant_id'], $body['data'] ) ) {
+				return new WP_Error( 'j365_logo', 'Não foi possível salvar o logotipo. Use PNG ou JPEG de até 64 KiB e 512 × 512 pixels.', [ 'status' => 400 ] );
+			}
+		}
+		Audit::log( 'tenant_settings', $s['tenant_id'], $s['upn'], [ 'changed' => [ $remove ? 'brand_removed' : 'brand_saved' ] ] );
+		return new WP_REST_Response( [ 'configured' => ! $remove ] );
+	}
+
+	public function identity_history_status(): WP_REST_Response {
+		return new WP_REST_Response( Identity_History::status( $this->session()['tenant_id'] ) );
+	}
+
+	public function identity_history_change( WP_REST_Request $request ) {
+		$s = $this->session();
+		if ( ! self::has_role( $s['roles'], self::MANAGE_ACCESS_ROLES ) ) {
+			return $this->forbid_change( 'Somente um administrador global ou de funções privilegiadas pode alterar o histórico do tenant.' );
+		}
+		$args = $request->get_json_params();
+		if ( ! is_array( $args ) || [ 'enabled' ] !== array_keys( $args ) || ! is_bool( $args['enabled'] ) ) {
+			return new WP_Error( 'j365_history_input', 'Opção de histórico inválida.', [ 'status' => 400 ] );
+		}
+		if ( $args['enabled'] && ! in_array( 'identityscore', Settings::active_reports(), true ) ) {
+			return $this->forbid_change( 'Habilite o módulo Identity Score antes de ativar o histórico.' );
+		}
+		$ok = $args['enabled'] ? Identity_History::enable( $s['tenant_id'] ) : Identity_History::disable( $s['tenant_id'] );
+		if ( ! $ok ) {
+			return new WP_Error( 'j365_history_write', 'Não foi possível alterar o histórico do tenant.', [ 'status' => 503 ] );
+		}
+		return $this->identity_history_status();
 	}
 
 	public function me(): WP_REST_Response {

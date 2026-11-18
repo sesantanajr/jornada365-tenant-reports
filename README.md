@@ -12,6 +12,14 @@
 
 Open the hosted portal and select **Sign in with Microsoft 365**. On first use, an authorized administrator connects the organization's Microsoft Entra directory and reviews the requested permissions. After setup, people with an allowed role can sign in with their work accounts. Access to individual Microsoft services depends on the organization's licenses and delegated permissions. [Open the portal in English](https://tenant.jornada365.cloud/?lang=en)
 
+### Overview
+
+Compare directory accounts, Conditional Access policy states and the most assigned paid products. Open a chart's report for details, or check the collection times to see which sources responded. The dashboard uses the same Graph requests as the overview it summarizes.
+
+![Executive Overview showing directory accounts, policy states and the five most assigned products in a fictional tenant.](docs/assets/overview-en.webp)
+
+For the logo beside the company name, open **Settings** in the signed-in portal. The organization logo panel shows the image source and lets a tenant administrator configure a fallback. The portal operator's branding is configured separately in WordPress.
+
 ### What you can manage
 
 | Area | What the portal helps you do |
@@ -36,7 +44,7 @@ Open the hosted portal and select **Sign in with Microsoft 365**. On first use, 
 
 *Groups report in English. The Brazilian Portuguese screenshot below uses the same 40 fictional groups.*
 
-The Identity Score history starts with the observations Microsoft Graph returns. To build a longer record, download the history file and import it on a later visit to the same tenant. The file contains the tenant ID, dates and scores. The portal reads it in your browser and labels the source of each observation. Months without measurements remain empty. [Microsoft Graph score history](https://learn.microsoft.com/graph/api/recommendation-tenantsecurescores?view=graph-rest-beta)
+In **Security → Identity Score → Portal history**, a tenant administrator can opt in to retain the latest measured score for each of 24 UTC calendar months. Generating the report collects available Graph observations. Months without a measurement remain empty. The Excel export identifies each source. Local JSON files can also extend the timeline. [History, access, erasure and unattended collection](docs/identity-score-history.md#english)
 
 ![Monthly Identity Score, measurement coverage and exact points in a fictional Microsoft Entra tenant.](docs/assets/identity-score-en.webp)
 
@@ -50,7 +58,7 @@ In **Overview**, select **Build executive Excel** to choose the sections for you
 4. In **Configurações**, set your company name, logo, support contact, policy links and enabled modules. For a single-company login, enter the Microsoft Entra directory ID under **Login corporativo**, customize the button and copy the sign-in link for your intranet.
 5. Open your new portal and connect the directory with an authorized administrator. Use the exact SPA redirect URI shown by your installation when configuring the app registration.
 
-**Data handling.** WordPress stores portal settings, tenant bindings and a pseudonymized audit trail. During generation, it temporarily stores encrypted report state. Collecting the completed result removes the job. Abandoned jobs are cleaned up periodically. The browser builds the final workbook. Credential reports use identifiers and validity dates.
+**Data handling.** WordPress stores portal settings, tenant bindings and a pseudonymized audit trail. A tenant can also retain its fallback logo and opt in to a 24-month archive of aggregate Identity Score measurements. During generation, it temporarily stores encrypted report state. Collecting the completed result removes the job. Abandoned jobs are cleaned up periodically. The browser builds the final workbook. Credential reports use identifiers and validity dates.
 
 The installer is built from `wordpress/jornada365-tenant-portal/`. To build it locally, run `python scripts/package.py` from the repository root. The ZIP is written to `dist/`. Created by Sérgio Sant'Ana Júnior, Jornada 365. [GPL-2.0-or-later](LICENSE) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releases](https://github.com/sesantanajr/jornada365-tenant-reports/releases)
 
@@ -63,6 +71,14 @@ The bundled Fluent icons have an MIT notice, and the fonts have SIL Open Font Li
 ### Usar o portal gratuito
 
 Abra o portal e selecione **Entrar com Microsoft 365**. No primeiro acesso, um administrador autorizado conecta o diretório Microsoft Entra da empresa e revisa as permissões solicitadas. Depois, as pessoas com uma função aceita pelo portal entram com a conta corporativa. O acesso a cada serviço Microsoft depende das licenças e permissões delegadas da organização. [Abrir o portal em português](https://tenant.jornada365.cloud/?lang=pt-BR)
+
+### Visão geral
+
+Compare as contas do diretório, o estado das políticas de Acesso Condicional e os produtos pagos com mais atribuições. Abra o relatório pelo gráfico para investigar ou consulte os horários de coleta para saber quais fontes responderam.
+
+![Visão geral com contas do diretório, estados das políticas e cinco produtos com mais atribuições em um tenant fictício.](docs/assets/overview-pt-br.webp)
+
+Para verificar a imagem ao lado do nome da empresa, entre no portal e abra **Configurações → Logotipo da organização**. O painel mostra a origem da marca e permite que um administrador do tenant configure uma imagem alternativa. A marca do operador do portal é configurada no WordPress.
 
 ### O que você pode gerenciar
 
@@ -88,7 +104,7 @@ Abra o portal e selecione **Entrar com Microsoft 365**. No primeiro acesso, um a
 
 *Relatório de Grupos em português brasileiro. São os mesmos 40 grupos fictícios da captura em inglês.*
 
-O histórico do Identity Score começa com as medições que o Microsoft Graph devolve. Para construir um histórico mais longo, baixe o arquivo de histórico e importe-o em uma próxima consulta ao mesmo tenant. O arquivo contém o ID do tenant, as datas e os pontos. O portal lê o arquivo no navegador e identifica a origem de cada medição. Meses sem dados ficam em branco. [Histórico de pontuação no Microsoft Graph](https://learn.microsoft.com/graph/api/recommendation-tenantsecurescores?view=graph-rest-beta)
+Em **Segurança → Identity Score → Histórico do portal**, um administrador do tenant pode autorizar a retenção da última medição de cada mês em uma janela de 24 meses UTC. O portal consulta o Graph ao gerar o relatório. Os meses sem medição ficam em branco e o Excel identifica a origem de cada fechamento. Arquivos JSON locais também podem complementar o período. [Histórico, acesso, exclusão e coleta agendada](docs/identity-score-history.md#português)
 
 ![Evolução mensal do Identity Score, cobertura das medições e pontos exatos em um tenant fictício do Microsoft Entra.](docs/assets/identity-score-pt-br.webp)
 
@@ -102,7 +118,7 @@ Em **Visão geral**, selecione **Gerar Excel executivo** e escolha as seções d
 4. Em **Configurações**, defina nome, logo, contato de suporte, links das políticas e módulos habilitados. Para usar um login exclusivo da empresa, informe o ID do diretório Microsoft Entra em **Login corporativo**, personalize o botão e copie o link para a intranet. [Guia do login corporativo](docs/login-corporativo.md)
 5. Abra o portal da empresa e conecte o diretório com um administrador autorizado. Ao configurar o registro de aplicativo, use exatamente o endereço de retorno SPA mostrado na sua instalação.
 
-**Uso dos dados.** O WordPress guarda as configurações do portal, os vínculos dos tenants e a auditoria pseudonimizada. Durante a geração, o progresso do relatório fica temporariamente cifrado. A coleta do resultado remove o trabalho concluído. Uma rotina periódica limpa os trabalhos abandonados. O navegador gera a planilha final. Os relatórios de credenciais usam identificadores e datas de validade. [Desempenho e implantação](docs/desempenho.md)
+**Uso dos dados.** O WordPress guarda as configurações do portal, os vínculos dos tenants e a auditoria pseudonimizada. Cada empresa pode guardar uma imagem alternativa e ativar um histórico agregado de até 24 meses do Identity Score. Durante a geração, o progresso do relatório fica temporariamente cifrado. A coleta do resultado remove o trabalho concluído. Uma rotina periódica limpa os trabalhos abandonados. O navegador gera a planilha final. Os relatórios de credenciais usam identificadores e datas de validade. [Desempenho e implantação](docs/desempenho.md)
 
 O instalador é gerado a partir de `wordpress/jornada365-tenant-portal/`. Para compilá-lo localmente, execute `python scripts/package.py` na raiz do repositório. O ZIP fica em `dist/`. Projeto criado por Sérgio Sant'Ana Júnior, da Jornada 365. [GPL-2.0-or-later](LICENSE) · [Contribuições](CONTRIBUTING.md) · [Segurança](SECURITY.md) · [Lançamentos](https://github.com/sesantanajr/jornada365-tenant-reports/releases)
 
