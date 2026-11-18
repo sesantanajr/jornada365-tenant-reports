@@ -2,25 +2,36 @@
 Contributors: jornada365
 Tags: microsoft 365, entra id, intune, microsoft graph, reports
 Requires at least: 6.4
-Tested up to: 6.8
+Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.2
+Stable tag: 1.2.3
 License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
-Relatórios Microsoft 365 / Entra ID / Intune com o aplicativo criado dentro do tenant de cada cliente — sem segredo, sem certificado, sem depender de outro tenant.
+Portal open source de relatórios Microsoft 365, Entra ID e Intune. Cada organização conecta seu próprio tenant e pode hospedar o portal no WordPress.
 
 == Description ==
-Qualquer administrador conecta o próprio tenant pelo portal: o aplicativo "Tenant Jornada365" é criado dentro do tenant dele (aplicativo de página única, permissões delegadas somente leitura, sem segredo e sem certificado) e os relatórios saem com a conta de quem entra — relatórios de identidade, MFA, contas inativas, dispositivos (híbridos, cloud-only, obsoletos, suporte do SO, filtro por plataforma), aplicativos e versões (com homologação), Acesso Condicional, grupos, licenciamento & custo, colaboração externa (convidados), domínios, políticas de autenticação, acessos privilegiados (PIM), risco (Identity Protection), consentimentos/credenciais de apps, Secure Score, uso do M365, caixas de correio (cotas e arquivamento) e OneDrive/SharePoint (limites e Top N).
+Um administrador com função de registro e consentimento conecta a empresa pelo portal. O aplicativo de página única é registrado no diretório da empresa. Os relatórios usam as permissões delegadas de leitura da conta que entra. Os módulos de ação habilitados requerem permissões adicionais. O portal oferece relatórios de identidade, MFA, contas inativas, dispositivos (híbridos, cloud-only, obsoletos, suporte do SO, filtro por plataforma), aplicativos e versões (com homologação), Acesso Condicional, grupos, licenciamento & custo, colaboração externa (convidados), domínios, políticas de autenticação, acessos privilegiados (PIM), risco (Identity Protection), consentimentos/credenciais de apps, Secure Score, uso do M365, caixas de correio (cotas e arquivamento) e OneDrive/SharePoint (limites e Top N).
 
 Soluções com a conta de quem clica (permissões delegadas, RBAC da Microsoft): ações remotas do Intune (sincronizar, reiniciar, verificação e atualização do Microsoft Defender), arquivamento de caixas (ativar ou desativar o arquivo morto, expansão automática e sincronização imediata) e exibição dos nomes nos relatórios de uso. Exportação Excel nativa com resumo executivo, gráficos e tabelas filtráveis, gerada no navegador. O WordPress guarda configurações, auditoria limitada e estado temporário dos relatórios em processamento.
 
 == Installation ==
-1. Envie o zip em Plugins → Adicionar novo (ou pelo J365 Bridge) e ative.
+1. Baixe jornada365-tenant-portal.zip nos [lançamentos do projeto](https://github.com/sesantanajr/jornada365-tenant-reports/releases). No WordPress, abra Plugins → Adicionar plugin → Enviar plugin, selecione o ZIP e ative.
 2. Nada a registrar no seu próprio tenant: em wp-admin → Tenant Jornada365 → Assistente, confira o retorno do login (SPA) em HTTPS e clique em "Testar conexão com a Microsoft".
 3. O administrador de cada empresa abre o portal → "Entrar com Microsoft 365" → informa o e-mail → "Sou administrador: conectar o tenant". Com um Global Administrator, Cloud Application Administrator ou Application Administrator, o portal cria o app no tenant dele, aprova as permissões delegadas e entra (código da Microsoft, navegador ou criação manual).
 4. Depois disso, quem tem uma função autorizada no tenant entra com o app do próprio tenant.
 
+== External services ==
+O login usa o Microsoft Entra ID. Ao entrar, a organização fornece sua identidade à Microsoft e aprova as permissões do aplicativo do seu diretório. Ao gerar um relatório, o WordPress envia a consulta ao Microsoft Graph com a credencial delegada do usuário. Os dados consultados dependem do relatório escolhido. As ações de Intune e Exchange enviam à Microsoft a operação e os recursos selecionados quando o usuário a confirma. O catálogo de nomes de licenças pode consultar periodicamente a lista pública da Microsoft. Consulte a [política de privacidade da Microsoft](https://privacy.microsoft.com/pt-br/privacystatement) e os [termos dos produtos](https://www.microsoft.com/licensing/terms/).
+
 == Changelog ==
+= 1.2.3 =
+* Recupera falhas temporárias ao iniciar um relatório e retoma leituras paginadas do Graph a partir do progresso salvo.
+* Mostra quando os dados foram gerados, preserva a tabela em caso de falha na atualização e mantém o botão de limpar filtros visível no celular.
+* Permite ordenar pelo teclado e informa a direção da ordenação aos leitores de tela.
+* Usa os salts do WordPress em hospedagens que os mantêm no banco. Nessas instalações, pode ser necessário entrar novamente após atualizar.
+* A distribuição inclui um instalador do portal e testes automáticos publicados no GitHub.
+
 = 1.2.2 =
 * Relatórios com chamadas de leitura limitadas por etapa, retomada após limites da Microsoft e consultas complementares mais seletivas.
 * Tempo de espera e recuperação de erro na interface, com cancelamento da espera e melhorias para tabelas em telas menores.

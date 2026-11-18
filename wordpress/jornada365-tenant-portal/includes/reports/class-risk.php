@@ -53,7 +53,7 @@ final class Risk extends Report_Base {
 					'detectionTiming' => (string) ( $d['detectionTimingType'] ?? '' ),
 				] );
 			} catch ( Graph_Exception $e ) {
-				$this->warn( $state, 'Detecções de risco indisponíveis: ' . $e->getMessage() . ' (IdentityRiskEvent.Read.All).' );
+				$this->optional_error( $state, 'Detecções de risco indisponíveis (IdentityRiskEvent.Read.All)', $e );
 				$state['detections'] = [];
 				$done                = true;
 			}

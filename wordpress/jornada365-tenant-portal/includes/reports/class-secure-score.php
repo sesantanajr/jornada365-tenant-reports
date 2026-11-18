@@ -14,20 +14,25 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class Secure_Score extends Report_Base {
 
 	public function step( array $state, array $params, float $deadline ): array {
-		try {
-			$scores = $this->graph->get( '/v1.0/security/secureScores?$top=8' );
-		} catch ( Graph_Exception $e ) {
-			if ( $e->is_forbidden() ) {
-				throw new Graph_Exception( 'Secure Score indisponível: ' . $e->getMessage() . ' (requer SecurityEvents.Read.All).', $e->getCode(), $e->graph_code() );
+		if ( 0 === $state['phase'] ) {
+			try {
+				$scores = $this->graph->get( '/v1.0/security/secureScores?$top=8' );
+			} catch ( Graph_Exception $e ) {
+				if ( $e->is_forbidden() ) {
+					throw new Graph_Exception( 'Secure Score indisponível: ' . $e->getMessage() . ' (requer SecurityEvents.Read.All).', $e->getCode(), $e->graph_code() );
+				}
+				throw $e;
 			}
-			throw $e;
+			$list = $scores['value'] ?? [];
+			$state['latest'] = $list[0] ?? [];
+			$state['trend']  = array_map( static fn( $s ) => [ 'date' => (string) ( $s['createdDateTime'] ?? '' ), 'current' => (float) ( $s['currentScore'] ?? 0 ), 'max' => (float) ( $s['maxScore'] ?? 0 ) ], $list );
+			$state['phase']  = 1;
 		}
-		$list    = $scores['value'] ?? [];
-		$latest  = $list[0] ?? [];
-		$profiles = [];
 		try {
-			foreach ( $this->graph->get_all( '/v1.0/security/secureScoreControlProfiles' ) as $p ) {
-				$profiles[ strtolower( (string) $p['id'] ) ] = [
+			$done = $this->fetch_collection(
+				$state, 'profile_rows', '/v1.0/security/secureScoreControlProfiles', $deadline, [],
+				static fn( $p ) => [
+					'id'          => strtolower( (string) $p['id'] ),
 					'title'       => (string) ( $p['title'] ?? $p['id'] ),
 					'category'    => (string) ( $p['controlCategory'] ?? '' ),
 					'maxScore'    => (float) ( $p['maxScore'] ?? 0 ),
@@ -36,15 +41,16 @@ final class Secure_Score extends Report_Base {
 					'tier'        => (string) ( $p['tier'] ?? '' ),
 					'deprecated'  => ! empty( $p['deprecated'] ),
 					'override'    => self::override_state( (array) ( $p['controlStateUpdates'] ?? [] ) ),
-				];
+				]
+			);
+			if ( ! $done ) {
+				return [ 'state' => $state, 'progress' => count( $state['profile_rows'] ), 'total' => 0, 'done' => false, 'message' => 'Carregando perfis de controle do Secure Score…' ];
 			}
 		} catch ( Graph_Exception $e ) {
-			$this->warn( $state, 'Perfis de controle indisponíveis: ' . $e->getMessage() );
+			$this->optional_error( $state, 'Perfis de controle indisponíveis', $e );
 		}
-
-		$state['latest']   = $latest;
-		$state['trend']    = array_map( fn( $s ) => [ 'date' => (string) ( $s['createdDateTime'] ?? '' ), 'current' => (float) ( $s['currentScore'] ?? 0 ), 'max' => (float) ( $s['maxScore'] ?? 0 ) ], $list );
-		$state['profiles'] = $profiles;
+		$state['profiles'] = array_column( $state['profile_rows'], null, 'id' );
+		unset( $state['profile_rows'], $state['profile_rows_next'], $state['profile_rows_done'] );
 		return [ 'state' => $state, 'progress' => 1, 'total' => 1, 'done' => true, 'message' => 'Concluído' ];
 	}
 

@@ -145,7 +145,7 @@ final class Admin_Ui {
 						<td><label>Contas inativas (padrão) <input type="number" min="1" max="730" name="<?php echo esc_attr( Settings::OPTION ); ?>[inactive_days]" value="<?php echo (int) $s['inactive_days']; ?>" class="small-text"> dias</label> &nbsp;
 							<label>Dispositivos obsoletos (padrão) <input type="number" min="1" max="730" name="<?php echo esc_attr( Settings::OPTION ); ?>[stale_device_days]" value="<?php echo (int) $s['stale_device_days']; ?>" class="small-text"> dias</label></td></tr>
 					<tr><th scope="row">Privacidade</th>
-						<td><p><strong>Nada dos relatórios é salvo no servidor</strong>: sessão em cookie cifrado, resultados apenas no navegador do usuário, dados em processamento cifrados com chave que só o navegador possui e apagados ao final (no máximo <?php echo (int) ( Jobs::TTL / MINUTE_IN_SECONDS ); ?> min).</p>
+						<td><p><strong>Processamento de relatórios.</strong> O WordPress guarda o progresso e o resultado cifrados com a chave da sessão. A entrega ao navegador remove o registro. A limpeza periódica elimina os trabalhos com mais de <?php echo (int) ( Jobs::TTL / MINUTE_IN_SECONDS ); ?> minutos de inatividade.</p>
 							<label>Retenção da auditoria pseudonimizada <input type="number" min="1" max="365" name="<?php echo esc_attr( Settings::OPTION ); ?>[audit_days]" value="<?php echo (int) ( $s['audit_days'] ?? 30 ); ?>" class="small-text"> dias</label></td></tr>
 					<tr><th scope="row">Rede</th>
 						<td><label><input type="checkbox" name="<?php echo esc_attr( Settings::OPTION ); ?>[trust_cloudflare]" value="1" <?php checked( $s['trust_cloudflare'] ); ?>> Site atrás do Cloudflare (usar <code>CF-Connecting-IP</code> apenas quando o IP de origem pertencer aos ranges do Cloudflare).</label></td></tr>
@@ -218,7 +218,7 @@ final class Admin_Ui {
 				<?php endforeach; ?>
 				</tbody>
 			</table>
-			<p class="description">Por privacidade, o portal guarda só o ID do tenant<?php echo $per ? ', o ID do aplicativo do tenant' : ''; ?>, o status e datas — nomes e e-mails nunca são armazenados. Revogar bloqueia o acesso na próxima requisição (as sessões são verificadas a cada chamada), mas o aplicativo continua no tenant do cliente até que o administrador dele o exclua.<?php echo $per ? ' Remover apaga o vínculo tenant → aplicativo: o próximo login de um administrador do cliente com o aplicativo existente o registra de novo.' : ''; ?></p>
+			<p class="description">O cadastro usa o ID do tenant<?php echo $per ? ', o ID do aplicativo do tenant' : ''; ?>, o status e as datas da conexão. O WordPress também mantém as configurações e a auditoria do portal. Revogar bloqueia o acesso na próxima requisição (as sessões são verificadas a cada chamada), mas o aplicativo continua no tenant do cliente até que o administrador dele o exclua.<?php echo $per ? ' Remover apaga o vínculo tenant → aplicativo: o próximo login de um administrador do cliente com o aplicativo existente o registra de novo.' : ''; ?></p>
 		</div>
 		<?php
 	}
@@ -351,11 +351,11 @@ final class Admin_Ui {
 			</form>
 			<?php if ( Settings::per_tenant() ) : ?>
 			<h2>Relatórios</h2>
-			<p class="description" style="max-width:900px">No modelo por tenant não existe token de aplicativo: os relatórios rodam no navegador de quem entra, com a conta e o aplicativo do tenant dele. Para testá-los, entre no portal com um administrador de um tenant conectado.</p>
+			<p class="description" style="max-width:900px">No modelo por tenant, o WordPress consulta o Microsoft Graph usando o token delegado enviado pelo navegador. Para testar os relatórios, entre no portal com uma conta autorizada de um tenant conectado.</p>
 			<?php else : ?>
 			<?php $j365_types = array_values( array_diff( Settings::active_reports(), [ 'app_devices' ] ) ); ?>
 			<h2>Testar todos os relatórios</h2>
-			<p class="description" style="max-width:900px">Executa cada relatório no tenant da Jornada 365 (o tenant onde o aplicativo foi registrado) e mostra apenas o resultado técnico — status, linhas, tempo e avisos. Nenhum dado de relatório é exibido, transmitido ou salvo.</p>
+			<p class="description" style="max-width:900px">Consulta o Microsoft Graph no tenant em que o aplicativo foi registrado. O diagnóstico exibe o status, a contagem de linhas, o tempo e os avisos de cada relatório.</p>
 			<p><button type="button" class="button button-primary" id="j365-diag-run" <?php disabled( ! Settings::is_configured() ); ?>>Testar todos os relatórios</button> <span id="j365-diag-status" class="description"></span></p>
 			<table class="widefat striped" id="j365-diag-table" style="max-width:1100px;display:none"><thead><tr><th>Relatório</th><th>Status</th><th>Linhas</th><th>Tempo</th><th>Avisos / erro</th></tr></thead><tbody></tbody></table>
 			<script>

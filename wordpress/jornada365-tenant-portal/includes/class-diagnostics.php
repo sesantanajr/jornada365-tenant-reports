@@ -12,8 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Operator diagnostics: runs every enabled report against the publisher (home) tenant and returns
  * only the outcome — status, row count, duration, warnings and errors. No report content is
- * returned or stored. Available to WordPress administrators (wp-admin → Assistente) and to the
- * J365 Bridge pairing token when that plugin is active.
+ * returned or stored. Only signed-in WordPress administrators can run these diagnostics.
  */
 final class Diagnostics {
 
@@ -21,12 +20,8 @@ final class Diagnostics {
 		register_rest_route( Rest_Api::NS, '/diag/reports', [ 'methods' => 'POST', 'callback' => [ self::class, 'rest' ], 'permission_callback' => [ self::class, 'permission' ] ] );
 	}
 
-	public static function permission( WP_REST_Request $request ) {
+	public static function permission() {
 		if ( Bootstrap::can() ) {
-			return true;
-		}
-		$auth = (string) $request->get_header( 'authorization' );
-		if ( preg_match( '/^Bearer\s+(\S+)$/i', $auth, $m ) && class_exists( '\\J365BR\\Bridge_Token' ) && null !== \J365BR\Bridge_Token::verify( $m[1] ) ) {
 			return true;
 		}
 		return new WP_Error( 'j365_forbidden', 'Somente o operador do portal pode executar o diagnóstico.', [ 'status' => 403 ] );

@@ -24,7 +24,12 @@ final class Crypto {
 				return hash( 'sha256', 'j365tp|' . $raw, true );
 			}
 		}
-		$material = ( defined( 'AUTH_KEY' ) ? AUTH_KEY : '' ) . '|' . ( defined( 'SECURE_AUTH_KEY' ) ? SECURE_AUTH_KEY : '' ) . '|' . ( defined( 'LOGGED_IN_KEY' ) ? LOGGED_IN_KEY : '' );
+		$keys = [ defined( 'AUTH_KEY' ) ? AUTH_KEY : '', defined( 'SECURE_AUTH_KEY' ) ? SECURE_AUTH_KEY : '', defined( 'LOGGED_IN_KEY' ) ? LOGGED_IN_KEY : '' ];
+		// Preserve existing sessions on installations with configured keys. Managed hosts
+		// may let WordPress generate and store its site-specific salts in the database.
+		$placeholders = [ '', 'put your unique phrase here', __( 'put your unique phrase here' ) ];
+		$configured = array_filter( $keys, static fn( $key ) => is_string( $key ) && ! in_array( trim( $key ), $placeholders, true ) );
+		$material   = $configured ? implode( '|', $keys ) : wp_salt( 'auth' );
 		return hash( 'sha256', 'j365tp|' . $material, true );
 	}
 

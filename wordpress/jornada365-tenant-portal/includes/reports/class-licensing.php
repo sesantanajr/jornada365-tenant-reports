@@ -30,8 +30,11 @@ final class Licensing extends Report_Base {
 
 	public function step( array $state, array $params, float $deadline ): array {
 		if ( 0 === $state['phase'] ) {
+			if ( ! $this->fetch_collection( $state, 'sku_pages', '/v1.0/subscribedSkus', $deadline ) ) {
+				return [ 'state' => $state, 'progress' => count( $state['sku_pages'] ), 'total' => 0, 'done' => false, 'message' => 'Carregando catálogo de licenças…' ];
+			}
 			$skus = [];
-			foreach ( $this->graph->get_all( '/v1.0/subscribedSkus' ) as $sku ) {
+			foreach ( $state['sku_pages'] as $sku ) {
 				$id   = strtolower( (string) $sku['skuId'] );
 				$part = (string) ( $sku['skuPartNumber'] ?? '' );
 				$name = Sku_Catalog::name( $id, $part );
@@ -57,6 +60,7 @@ final class Licensing extends Report_Base {
 				];
 			}
 			$state['skus']  = $skus;
+			unset( $state['sku_pages'], $state['sku_pages_next'], $state['sku_pages_done'] );
 			$state['phase'] = 1;
 		}
 

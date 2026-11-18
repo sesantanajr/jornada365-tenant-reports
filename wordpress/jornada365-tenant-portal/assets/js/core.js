@@ -232,7 +232,7 @@
       catch (e) {
         signal?.throwIfAborted();
         if (e.reauth) { A.resume(); throw new Error('reauth'); }
-        if (opts.exo) throw e;
+        throw e;
       }
     }
     signal?.throwIfAborted();
@@ -257,6 +257,9 @@
       throw new Error('reauth');
     }
     if (res.status === 401 && !opts.wp) { document.dispatchEvent(new CustomEvent('j365:unauth')); throw new Error('unauthenticated'); }
+    if (res.ok && (!data || typeof data !== 'object')) {
+      throw Object.assign(new Error(t('O servidor devolveu uma resposta inválida.')), { status: 502 });
+    }
     if (!res.ok || (data && data.ok === false)) {
       const err = new Error(t((data && data.message) || `Erro HTTP ${res.status}`));
       err.data = data; err.status = res.status;

@@ -153,7 +153,7 @@
       ? (CFG.setup && CFG.setup.can
         ? h('p', { class: 'hero-note op' }, ic('spark'), h('span', null, 'Você é administrador deste portal: o primeiro clique registra o ', h('strong', null, raw(APP)), ' no tenant da Jornada 365 e concede as permissões.'))
         : h('p', { class: 'hero-note' }, ic('clock'), 'Portal em configuração. O login estará disponível em breve.'))
-      : h('p', { class: 'hero-note' }, ic('cloudoff'), h('span', null, h('strong', null, 'Nada fica salvo no servidor.'), ' ', 'Os relatórios vão direto para o seu navegador e desaparecem quando você sai.'));
+      : h('p', { class: 'hero-note' }, ic('cloudoff'), h('span', null, h('strong', null, 'Relatórios na sua aba.'), ' ', 'O WordPress cifra o progresso enquanto prepara o resultado.'));
     const cta = signInButton('lg');
     return h('section', { class: 'lx-hero', id: 'top' },
       h('div', { class: 'hero-copy' },
@@ -164,7 +164,10 @@
         h('div', { class: 'cta-row hero-cta', 'data-reveal': '', style: '--d:3' }, cta, h('a', { class: 'ghost-btn', href: '#relatorios' }, 'Ver relatórios', ic('down'))),
         h('div', { 'data-reveal': '', style: '--d:4' }, note),
         h('div', { class: 'hero-foot', 'data-reveal': '', style: '--d:5' },
-          h('div', { class: 'stats' }, stat(CFG.reportCount || 17, 'relatórios'), stat((CFG.permissions || []).length || 11, 'permissões somente leitura'), stat(0, 'dados salvos no servidor')))),
+          h('div', { class: 'stats' }, 
+            Number.isInteger(CFG.reportCount) ? stat(CFG.reportCount, 'relatórios') : null,
+            Array.isArray(CFG.permissions) ? stat(CFG.permissions.length, 'permissões de leitura dos relatórios') : null,
+            Number.isInteger(CFG.privacy?.auditDays) ? stat(CFG.privacy.auditDays, 'dias de retenção da auditoria') : null))),
       scanner(),
       h('a', { class: 'scroll-cue', href: '#como-funciona', 'aria-label': 'Mais informações' }, h('span', { class: 'mouse' }, h('i')), ic('chevron', 'ico chev')));
   }
@@ -195,7 +198,7 @@
       h('div', { class: 'steps-track' }, h('i', { class: 'track-line' }),
         PER ? card(1, 'contact_card', 'Informe o e-mail corporativo', 'O portal encontra o seu tenant e abre o login da Microsoft com o aplicativo do próprio tenant.', signin, 1)
           : card(1, 'contact_card', 'Entre com sua conta corporativa', 'Use o botão Entrar com Microsoft 365. O login pede apenas openid, profile e email.', signin, 1),
-        PER ? card(2, 'shield_checkmark', 'Conecte o seu tenant (uma vez)', 'Um administrador conecta o tenant pelo próprio portal: o aplicativo Tenant Jornada365 é criado dentro do seu tenant, com permissões delegadas somente leitura — sem segredo e sem certificado.', consent, 2)
+        PER ? card(2, 'shield_checkmark', 'Conecte o seu tenant (uma vez)', 'Um administrador registra o aplicativo no diretório da empresa e aprova as permissões dos módulos habilitados.', consent, 2)
           : card(2, 'shield_checkmark', 'Aprove o Tenant Jornada365', 'Na primeira vez, o Global Administrator vê a tela de permissões da Microsoft e clica em Aceitar. O aplicativo empresarial é criado no seu tenant.', consent, 2),
         PER ? card(3, 'data_pie', 'Relatórios prontos', 'Os relatórios são consultados com a sua própria conta e entregues direto ao seu navegador, prontos para filtrar e exportar.', report, 3)
           : card(3, 'data_pie', 'Relatórios prontos', 'Os relatórios são gerados pelo aplicativo aprovado e entregues direto ao seu navegador, prontos para filtrar e exportar.', report, 3)));
@@ -219,26 +222,25 @@
 
   function trust() {
     const facts = [
-      ['cloud_dismiss', 'Nada fica salvo no servidor', 'Relatórios processados em memória e entregues só ao seu navegador. O que está em andamento fica cifrado com a chave da sua sessão.'],
-      PER ? ['document_lock', 'Somente leitura por padrão', 'Os relatórios só leem, com as permissões da sua própria conta. Ações (sincronizar, arquivar) rodam apenas quando você clica.']
-        : ['document_lock', 'Somente leitura', 'Todas as permissões são Read. Nada é criado ou alterado no seu tenant.'],
-      PER ? ['certificate', 'Sem senhas, sem segredos', 'O aplicativo do seu tenant não tem segredo nem certificado. O login é da Microsoft, com a sua MFA e o seu Acesso Condicional; os tokens ficam só no seu navegador.']
-        : ['certificate', 'Sem senhas, sem segredos', 'Autenticação por certificado: a chave privada nunca sai do servidor e sua senha nunca passa por aqui.'],
+      ['cloud_dismiss', 'Processamento temporário cifrado', 'O WordPress cifra o progresso e o resultado com a chave da sessão. A entrega ao navegador remove o registro temporário. A limpeza periódica remove trabalhos inativos.'],
+      ['document_lock', 'Relatórios e ações', 'Os relatórios consultam dados. Quando habilitadas, as ações exigem permissões adicionais e uma conta autorizada para executar a operação.'],
+      PER ? ['certificate', 'Login pela Microsoft', 'A Microsoft aplica as políticas de acesso da empresa. O navegador envia os tokens ao portal nas chamadas autenticadas.']
+        : ['certificate', 'Login pela Microsoft', 'O portal usa a credencial de aplicativo configurada pelo operador para consultar relatórios. Você entra pela Microsoft.'],
       ['building', 'Isolado por tenant', 'Cada sessão é amarrada ao seu tenant, com chave própria, e verificada a cada chamada.'],
-      ['shield_checkmark', 'Zero Trust contínuo', 'Sua função é revalidada a cada 15 minutos e em toda alteração — perdeu a função, perdeu o acesso.'],
-      PER ? ['dismiss_circle', 'Seu tenant, seu aplicativo', 'O aplicativo fica no seu tenant e não depende de nenhum outro. Exclua-o no Entra ID e o acesso para na hora.']
-        : ['dismiss_circle', 'Revogue quando quiser', 'Exclua o aplicativo empresarial Tenant Jornada365 no Entra ID e o acesso para na hora.'],
+      ['shield_checkmark', 'Zero Trust contínuo', 'O portal revalida periodicamente sua função e verifica a autorização antes das ações administrativas.'],
+      PER ? ['dismiss_circle', 'Seu tenant, seu aplicativo', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.']
+        : ['dismiss_circle', 'Revogue quando quiser', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.'],
     ];
     return h('section', { class: 'lx-trust', id: 'seguranca' },
       h('div', { class: 'trust-in' },
-        h('div', { class: 'sec-head left', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Zero Trust'), h('h2', null, 'Segurança por padrão'), h('p', null, 'Mínimo privilégio, nenhum dado guardado e transparência total sobre o que é pedido.')),
+        h('div', { class: 'sec-head left', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Zero Trust'), h('h2', null, 'Segurança por padrão'), h('p', null, 'Confira os dados que o portal processa e as permissões dos módulos habilitados.')),
         h('div', { class: 'facts' }, ...facts.map(([i, title, text], n) => h('div', { class: 'fact spot', 'data-reveal': '', style: `--d:${n + 1}` }, h('span', { class: 'fact-ic' }, fi(i)), h('div', null, h('h3', null, title), h('p', null, text))))),
-        h('details', { class: 'perm-box', 'data-reveal': '' }, h('summary', null, ic('lock'), h('span', null, 'Ver as permissões do Microsoft Graph e o fluxo de dados')), h('div', { class: 'perm-body' }, permissionsPanel(),
+        h('details', { class: 'perm-box', 'data-reveal': '' }, h('summary', null, ic('lock'), h('span', null, 'Ver permissões dos módulos e fluxo de dados')), h('div', { class: 'perm-body' }, permissionsPanel(),
           h('ol', { class: 'flow' },
             PER ? h('li', null, 'Você informa o e-mail e entra na Microsoft com o aplicativo do seu próprio tenant.') : h('li', null, 'Você entra com a conta corporativa (openid, profile, email).'),
             h('li', null, 'O servidor confirma no seu tenant que você tem uma função de administrador ou leitor.'),
             PER ? h('li', null, 'Os relatórios são consultados no Microsoft Graph com a sua conta (permissões delegadas).') : h('li', null, 'Os relatórios são consultados no Microsoft Graph com o aplicativo aprovado pelo seu administrador.'),
-            h('li', null, 'O resultado vai direto para o seu navegador; nada é gravado no servidor.'))))));
+            h('li', null, 'Depois de receber o resultado, você pode consultá-lo na aba ou exportá-lo para um arquivo.'))))));
   }
 
   function consentLinkFor(domain) {
@@ -265,16 +267,16 @@
     const qa = PER ? [
       ['Preciso instalar alguma coisa?', 'Não. Um administrador conecta o tenant pelo portal e o aplicativo Tenant Jornada365 é criado dentro do próprio tenant, sem script.'],
       ['Quem pode conectar?', 'Global Administrator, Cloud Application Administrator ou Application Administrator do seu tenant, uma única vez.'],
-      ['Depende do tenant de outra empresa?', 'Não. O aplicativo é criado e fica no seu tenant; o portal não usa aplicativo de nenhum outro tenant e não guarda credenciais.'],
+      ['Depende do tenant de outra empresa?', 'O aplicativo usado para entrar pertence ao diretório da sua empresa. O WordPress mantém o vínculo entre o tenant e esse aplicativo.'],
       ['Quais licenças são necessárias?', 'Atividade de login e Acesso Condicional exigem Entra ID P1; risco exige P2; dispositivos e aplicativos exigem Intune. O portal avisa quando algo não estiver disponível.'],
-      ['O que fica salvo no servidor?', 'Nenhum dado do seu tenant e nenhuma credencial. Os relatórios ficam só no seu navegador até você fechar a aba ou sair. O servidor guarda apenas o ID do tenant e o ID do aplicativo do seu tenant (identificadores públicos) e um registro de segurança pseudonimizado, apagado em 30 dias.'],
-      ['Como removo o acesso?', 'Exclua o aplicativo Tenant Jornada365 em Entra ID → Registros de aplicativo. O acesso para na hora.'],
+      ['O que fica salvo no servidor?', 'O WordPress guarda o vínculo do tenant e as configurações. A auditoria pseudonimizada segue a retenção definida pelo operador. Durante a geração, o portal guarda o progresso e o resultado cifrados. Ele remove o resultado ao entregá-lo ao navegador e limpa trabalhos inativos periodicamente.'],
+      ['Como removo o acesso?', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.'],
     ] : [
       ['Preciso instalar alguma coisa?', 'Não. O administrador aprova o Tenant Jornada365 na tela da Microsoft e o aplicativo empresarial é criado automaticamente no tenant.'],
       ['Quem pode aprovar?', 'Um Global Administrator ou Privileged Role Administrator do seu tenant, uma única vez.'],
       ['Quais licenças são necessárias?', 'Atividade de login e Acesso Condicional exigem Entra ID P1; risco exige P2; dispositivos e aplicativos exigem Intune. O portal avisa quando algo não estiver disponível.'],
-      ['O que fica salvo no servidor?', 'Nenhum dado do seu tenant. Os relatórios ficam só no seu navegador até você fechar a aba ou sair. O servidor guarda apenas o ID do tenant (para permitir revogar o acesso) e um registro de segurança pseudonimizado, sem nomes ou e-mails, apagado em 30 dias.'],
-      ['Como removo o acesso?', 'Exclua o aplicativo empresarial Tenant Jornada365 em Entra ID → Aplicativos empresariais. Sessões e tokens param imediatamente.'],
+      ['O que fica salvo no servidor?', 'O WordPress guarda o vínculo do tenant e as configurações. A auditoria pseudonimizada segue a retenção definida pelo operador. Durante a geração, o portal guarda o progresso e o resultado cifrados. Ele remove o resultado ao entregá-lo ao navegador e limpa trabalhos inativos periodicamente.'],
+      ['Como removo o acesso?', 'O administrador gerencia o aplicativo no Microsoft Entra ID. Para bloquear o vínculo no portal, solicite a revogação ao operador.'],
     ];
     return h('div', { class: 'faq-wrap' },
       h('div', { class: 'sec-head', 'data-reveal': '' }, h('span', { class: 'kicker' }, 'Perguntas'), h('h2', null, 'Perguntas frequentes')),
@@ -293,7 +295,7 @@
 
   function footer() {
     return h('footer', { class: 'lx-foot' },
-      h('div', { class: 'foot-cta', 'data-reveal': '' }, h('h2', null, 'Pronto para ver o seu tenant?'), signInButton('lg'), h('span', { class: 'foot-note' }, ic('cloudoff'), 'Nada fica salvo no servidor.')),
+      h('div', { class: 'foot-cta', 'data-reveal': '' }, h('h2', null, 'Pronto para ver o seu tenant?'), signInButton('lg'), h('span', { class: 'foot-note' }, ic('cloudoff'), 'Relatórios na sua aba.')),
       h('div', { class: 'foot-row' },
         h('div', { class: 'foot-brand' }, logo('foot-logo'), h('span', { class: 'tagline' }, 'Inove, conecte-se, evolua.')),
         h('div', { class: 'foot-links' },
@@ -325,7 +327,7 @@
     let gen = 0; // each sign-in attempt invalidates the previous polling loop
 
     const intro = () => h('div', { class: 'setup-intro' },
-      h('div', { class: 'setup-app' }, CFG.iconUrl ? h('img', { src: CFG.iconUrl, alt: '' }) : svg(cloudSvg('jsetup')), h('div', null, h('b', null, raw(APP)), h('small', null, 'Aplicativo multi-tenant · somente leitura · certificado'))),
+      h('div', { class: 'setup-app' }, CFG.iconUrl ? h('img', { src: CFG.iconUrl, alt: '' }) : svg(cloudSvg('jsetup')), h('div', null, h('b', null, raw(APP)), h('small', null, 'Aplicativo multi-tenant com certificado'))),
       h('p', null, 'Entre com um ', h('strong', null, 'Global Administrator do tenant da Jornada 365'), '. O portal cria o aplicativo, envia o logo e o certificado, concede as permissões e já entra — sem script e sem client secret.'));
 
     function startDevice() {
@@ -465,7 +467,7 @@
       body.innerHTML = '';
       body.append(h('p', { class: 'lead-sm' }, COMPANY ? 'Continue para entrar com a sua conta Microsoft corporativa.' : 'Informe o seu e-mail de trabalho. O portal encontra o seu tenant e abre o login da Microsoft com o aplicativo do próprio tenant.'),
         form, note,
-        h('p', { class: 'fine si-fine' }, ic('lock'), h('span', null, 'A senha é digitada só na Microsoft. O aplicativo fica no seu tenant e os tokens, só neste navegador.')));
+        h('p', { class: 'fine si-fine' }, ic('lock'), h('span', null, 'Digite a senha na Microsoft. O portal recebe os tokens da sua sessão para consultar os dados autorizados.')));
       requestAnimationFrame(() => (COMPANY ? go : email).focus());
     };
     form.addEventListener('submit', async (e) => {
@@ -523,7 +525,7 @@
         h('div', null, h('b', null, raw(APP)), h('small', null, 'Criado no seu tenant · permissões delegadas · sem segredo e sem certificado'))),
       h('p', null, opts.update
         ? 'Entre com um administrador do seu tenant. O portal atualiza as permissões do aplicativo Tenant Jornada365 que já está no tenant.'
-        : 'Entre com um administrador do seu tenant. O portal cria o aplicativo Tenant Jornada365 dentro do seu tenant, aprova as permissões somente leitura e já entra. Nada é criado fora do seu tenant.'));
+        : 'Entre com um administrador do tenant para criar o aplicativo Tenant Jornada365 e revisar as permissões dos módulos habilitados.'));
 
     function choose() {
       ++gen;
@@ -531,7 +533,7 @@
       body.append(intro(),
         h('ul', { class: 'cx-list' },
           h('li', null, ic('check'), h('span', null, 'Aplicativo de página única com o endereço de retorno deste portal — sem client secret e sem certificado.')),
-          h('li', null, ic('check'), h('span', null, 'Permissões delegadas: o portal enxerga só o que a conta de quem entra pode ver, com MFA e Acesso Condicional do seu tenant.')),
+          h('li', null, ic('check'), h('span', null, 'O acesso depende dos escopos aprovados, da função da conta e das políticas do tenant.')),
           h('li', null, ic('check'), h('span', null, 'Para desconectar: exclua o aplicativo Tenant Jornada365 no Entra ID.'))),
         h('div', { class: 'role-chips' }, h('span', { class: 'muted small' }, 'Quem pode conectar:'), ...roles.map((x) => h('span', { class: 'role-chip' }, raw(x)))),
         h('details', { class: 'perm-box mini' }, h('summary', null, ic('lock'), h('span', null, 'Ver as permissões que serão aprovadas')), h('div', { class: 'perm-body' }, permissionsPanel())),

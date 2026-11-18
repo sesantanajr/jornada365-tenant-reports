@@ -153,7 +153,7 @@ final class Access_Problem {
 		};
 		$copy_link = $share ? [ 'kind' => 'copy', 'label' => $per ? 'Copiar link para o administrador' : 'Copiar link de aprovação', 'value' => $share, 'id' => 'j365-share' ] : null;
 		$mail      = $share ? ( $per
-			? [ 'kind' => 'mailto', 'label' => 'Enviar por e-mail', 'subject' => 'Conectar o tenant {domain} ao {app}', 'body' => "Olá! Para usar o {app} (relatórios do Microsoft 365, Entra ID e Intune) no tenant {domain}, preciso que um administrador (Global Administrator, Cloud Application Administrator ou Application Administrator) conecte o tenant pelo link abaixo. O portal cria o aplicativo dentro do nosso próprio tenant, com permissões delegadas somente leitura, sem segredo e sem certificado:\n\n{link}\n\nObrigado!", 'link' => $share ]
+			? [ 'kind' => 'mailto', 'label' => 'Enviar por e-mail', 'subject' => 'Conectar o tenant {domain} ao {app}', 'body' => "Olá! Para usar o {app} no tenant {domain}, precisamos que um Global Administrator, Cloud Application Administrator ou Application Administrator conecte a empresa pelo link abaixo. O portal registra o aplicativo no nosso diretório. Revise as permissões solicitadas para os relatórios e para os módulos de ação habilitados.\n\n{link}\n\nObrigado!", 'link' => $share ]
 			: [ 'kind' => 'mailto', 'label' => 'Enviar por e-mail', 'subject' => 'Aprovação do {app} no tenant {domain}', 'body' => "Olá! Para usar o {app} (relatórios do Microsoft 365, Entra ID e Intune) no tenant {domain}, preciso que um Global Administrator ou Privileged Role Administrator aprove o aplicativo:\n\n{link}\n\nNa tela da Microsoft, revise as permissões e clique em Aceitar. Obrigado!", 'link' => $share ] ) : null;
 		$other     = [ 'kind' => 'link', 'label' => 'Entrar com outra conta', 'href' => Request::login_url(), 'style' => 'ghost' ];
 		$retry     = [ 'kind' => 'link', 'label' => 'Tentar novamente', 'href' => Request::login_url( '' !== $tenant_id ? [ 't' => $tenant_id ] : [] ), 'style' => 'solid' ];
@@ -185,7 +185,7 @@ final class Access_Problem {
 						'state'  => 'fail',
 						'label'  => 'Aprovação do aplicativo no tenant',
 						'detail' => [
-							'consent_pending'    => 'O aplicativo está no tenant, mas 0 de {n} permissões somente leitura foram aprovadas.',
+							'consent_pending'    => 'O aplicativo está no tenant. Foram aprovadas 0 de {n} permissões de leitura dos relatórios.',
 							'consent_missing'    => 'O aplicativo ainda não foi adicionado ao tenant.',
 							'consent_removed'    => 'O aplicativo não está mais no tenant (excluído ou aprovação revogada).',
 							'consent_incomplete' => '{a} de {b} permissões aprovadas. Faltam:',
@@ -202,7 +202,7 @@ final class Access_Problem {
 				][ $code ];
 				$vm['steps'] = [
 					'Envie o link de aprovação para um Global Administrator ou Privileged Role Administrator do tenant.',
-					'O administrador abre o link, entra com a conta dele e clica em Aceitar na tela da Microsoft (somente leitura, {n} permissões).',
+					'O administrador abre o link, entra na Microsoft e revisa as permissões antes de conceder a aprovação.',
 					'Volte aqui e entre novamente — o acesso é liberado na hora.',
 				];
 				$vm['who']     = self::CONSENT_WHO;
@@ -228,7 +228,7 @@ final class Access_Problem {
 				$vm['checks']  = array_values( array_filter( [ $account, [ 'state' => 'fail', 'label' => 'Aplicativo do portal no seu tenant', 'detail' => 'Ainda não criado.' ], $role_row( true ) ] ) );
 				$vm['steps']   = [
 					'Um administrador abre o portal, clica em Entrar com Microsoft 365 e depois em Conectar o tenant.',
-					'Ele entra com a conta dele: o portal cria o aplicativo Tenant Jornada365 no tenant e aprova as permissões somente leitura.',
+					'O administrador entra no portal e aprova as permissões dos módulos habilitados para registrar o aplicativo Tenant Jornada365 no diretório da empresa.',
 					'Volte aqui e entre novamente.',
 				];
 				$vm['who']     = array_values( Settings::CONNECT_ROLES );

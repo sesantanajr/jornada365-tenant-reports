@@ -8,7 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Microsoft Graph client for tenant and delegated reports.
  * - Automatic paging via @odata.nextLink
- * - Retry with Retry-After on 429/503/504, exponential backoff otherwise
+ * - Resume transient read failures with Retry-After or bounded backoff
  * - JSON $batch helper (20 requests per call)
  * - Time budget awareness for chunked jobs
  */
@@ -16,6 +16,7 @@ final class Graph_Client {
 
 	private string $tenant_id;
 	private int $max_retries = 5;
+	private const RETRYABLE_READ_STATUS = [ 408, 429, 500, 502, 503, 504 ];
 	/** Human-readable notes about automatic adaptations (e.g. a property unavailable in v1.0). */
 	private array $notes = [];
 	/** End of the current job step (microtime). Waits that would run past it are handed back to the job. */
@@ -178,14 +179,16 @@ final class Graph_Client {
 				if ( $read && 401 === $results[ $id ]['status'] && Settings::per_tenant() ) {
 					throw new Graph_Exception( 'A autorização da Microsoft expirou ou foi revogada. A página vai renová-la.', 401, 'j365_token' );
 				}
-				if ( in_array( $results[ $id ]['status'], [ 429, 503, 504 ], true ) ) {
+				$status = $results[ $id ]['status'];
+				if ( in_array( $status, $read ? self::RETRYABLE_READ_STATUS : [ 429, 503, 504 ], true ) ) {
 					$results[ $id ]['retryAfter'] = self::retry_interval( (array) ( $resp['headers'] ?? [] ) );
+					$results[ $id ]['retryReason'] = 429 === $status ? 'throttled' : 'network';
 				}
 			}
 			// Job reports save completed responses and retry the throttled subset in a later poll.
 			foreach ( $retry_throttled && $read && $this->deadline <= 0 ? $chunk : [] as $req ) {
 				$id = (string) $req['id'];
-				if ( isset( $results[ $id ] ) && in_array( $results[ $id ]['status'], [ 429, 503, 504 ], true ) ) {
+				if ( isset( $results[ $id ]['retryAfter'] ) ) {
 					usleep( 1500000 );
 					try {
 						$single         = $this->request( $req['method'] ?? 'GET', self::versioned( (string) $req['url'] ), $req['body'] ?? null, $req['headers'] ?? [] );
@@ -246,13 +249,20 @@ final class Graph_Client {
 			$raw    = (string) wp_remote_retrieve_body( $response );
 
 			if ( $status >= 200 && $status < 300 ) {
-				if ( '' === trim( $raw ) ) {
+				if ( '' === trim( $raw ) && ( ! $read || 204 === $status ) ) {
 					return [];
 				}
 				$decoded = json_decode( $raw, true );
 				if ( ! is_array( $decoded ) ) {
-					// $count endpoints return a bare integer.
-					return [ 'value' => is_numeric( trim( $raw ) ) ? (int) trim( $raw ) : $raw ];
+					// Graph count endpoints return a bare integer. A gateway can also return
+					// a truncated JSON body or an HTML error document with HTTP 200.
+					if ( ctype_digit( trim( $raw ) ) ) {
+						return [ 'value' => (int) trim( $raw ) ];
+					}
+					if ( $read && $this->deadline > 0 ) {
+						throw new Graph_Throttled( 'O Microsoft Graph enviou uma resposta incompleta. Tentando novamente.', 2, 502, 'network' );
+					}
+					throw new Graph_Exception( 'O Microsoft Graph enviou uma resposta inválida.', 502, 'invalid_response' );
 				}
 				return $decoded;
 			}
@@ -269,14 +279,14 @@ final class Graph_Client {
 				continue;
 			}
 
-			if ( ! $read && $status >= 500 ) {
+			if ( ! $read && ( 408 === $status || $status >= 500 ) ) {
 				throw new Graph_Exception( 'A Microsoft não confirmou o resultado da ação. Verifique o estado antes de repeti-la.', $status, 'action_unconfirmed' );
 			}
-			if ( in_array( $status, [ 429, 503, 504 ], true ) && $attempt <= $this->max_retries ) {
+			if ( in_array( $status, $read ? self::RETRYABLE_READ_STATUS : [ 429 ], true ) && $attempt <= $this->max_retries ) {
 				$retry_after = self::retry_delay( (string) wp_remote_retrieve_header( $response, 'retry-after' ), 2 ** $attempt );
 				$wait        = min( 60, $retry_after );
 				if ( $this->deadline > 0 ) {
-					throw new Graph_Throttled( 'O Microsoft Graph pediu uma pausa. O relatório continua automaticamente.', $retry_after, $status );
+					throw new Graph_Throttled( 'A consulta ao Microsoft Graph continuará automaticamente.', $retry_after, $status, 429 === $status ? 'throttled' : 'network' );
 				}
 				if ( ! $this->can_wait( $wait ) ) {
 					throw new Graph_Throttled( 'O Microsoft Graph pediu uma pausa (limite de requisições). O relatório continua automaticamente.', max( $wait, $retry_after ), $status );
@@ -328,7 +338,7 @@ final class Graph_Client {
 			}
 			$status = (int) wp_remote_retrieve_response_code( $res );
 			if ( in_array( $status, [ 301, 302, 303, 307, 308 ], true ) ) {
-				return self::parse_csv( $this->download_report( (string) wp_remote_retrieve_header( $res, 'location' ), $ua ), $columns );
+				return self::parse_csv( $this->download_report( (string) wp_remote_retrieve_header( $res, 'location' ), $ua ), $columns, $this->deadline > 0 );
 			}
 			$raw = (string) wp_remote_retrieve_body( $res );
 			if ( 200 === $status ) {
@@ -340,7 +350,7 @@ final class Graph_Client {
 					$keys = array_flip( $columns );
 					return array_map( static fn( $row ) => array_intersect_key( (array) $row, $keys ), $json['value'] );
 				}
-				return self::parse_csv( $raw, $columns );
+				return self::parse_csv( $raw, $columns, $this->deadline > 0 );
 			}
 			if ( 401 === $status && Settings::per_tenant() ) {
 				throw new Graph_Exception( 'A autorização da Microsoft expirou ou foi revogada. A página vai renová-la.', 401, 'j365_token' );
@@ -349,11 +359,11 @@ final class Graph_Client {
 				$token = Token_Service::acquire( $this->tenant_id, true );
 				continue;
 			}
-			if ( in_array( $status, [ 429, 503, 504 ], true ) && $attempt <= $this->max_retries ) {
+			if ( in_array( $status, self::RETRYABLE_READ_STATUS, true ) && $attempt <= $this->max_retries ) {
 				$retry_after = self::retry_delay( (string) wp_remote_retrieve_header( $res, 'retry-after' ), 2 ** $attempt );
 				$wait        = min( 60, $retry_after );
 				if ( $this->deadline > 0 ) {
-					throw new Graph_Throttled( 'O Microsoft Graph pediu uma pausa. O relatório continua automaticamente.', $retry_after, $status );
+					throw new Graph_Throttled( 'A consulta ao Microsoft Graph continuará automaticamente.', $retry_after, $status, 429 === $status ? 'throttled' : 'network' );
 				}
 				if ( ! $this->can_wait( $wait ) ) {
 					throw new Graph_Throttled( 'O Microsoft Graph pediu uma pausa (limite de requisições). O relatório continua automaticamente.', max( $wait, $retry_after ), $status );
@@ -388,9 +398,9 @@ final class Graph_Client {
 				$location = \WP_Http::make_absolute_url( (string) wp_remote_retrieve_header( $response, 'location' ), $location );
 				continue;
 			}
-			if ( $this->deadline > 0 && in_array( $status, [ 429, 503, 504 ], true ) ) {
+			if ( $this->deadline > 0 && in_array( $status, self::RETRYABLE_READ_STATUS, true ) ) {
 				$pause = self::retry_delay( (string) wp_remote_retrieve_header( $response, 'retry-after' ), 2 );
-				throw new Graph_Throttled( 'A Microsoft pediu uma pausa no download. O relatório continua automaticamente.', $pause, $status );
+				throw new Graph_Throttled( 'O download do relatório continuará automaticamente.', $pause, $status, 429 === $status ? 'throttled' : 'network' );
 			}
 			throw new Graph_Exception( 'Download do relatório de uso falhou (HTTP ' . $status . ').', $status, 'download_failed' );
 		}
@@ -398,22 +408,19 @@ final class Graph_Client {
 	}
 
 	/** RFC 4180 CSV (UTF-8, optional BOM, quoted fields) → list of rows keyed by camelCase headers. */
-	public static function parse_csv( string $csv, array $columns = [] ): array {
+	public static function parse_csv( string $csv, array $columns = [], bool $expect_report = false ): array {
 		$csv = (string) preg_replace( '/^\xEF\xBB\xBF/', '', $csv );
-		if ( '' === trim( $csv ) ) {
-			return [];
-		}
 		$fh = fopen( 'php://temp', 'r+' );
 		fwrite( $fh, $csv );
 		rewind( $fh );
 		$head = fgetcsv( $fh, 0, ',', '"', '' );
-		if ( ! is_array( $head ) ) {
-			fclose( $fh );
-			return [];
-		}
-		$keys = array_map( [ self::class, 'camel' ], $head );
+		$keys = is_array( $head ) && [ null ] !== $head ? array_map( [ self::class, 'camel' ], $head ) : [];
 		if ( $columns ) {
 			$keys = array_intersect( $keys, $columns );
+		}
+		if ( $expect_report && ! $keys ) {
+			fclose( $fh );
+			throw new Graph_Throttled( 'O arquivo recebido não contém o cabeçalho do relatório. Tentando novamente.', 2, 502, 'network' );
 		}
 		$rows = [];
 		while ( false !== ( $line = fgetcsv( $fh, 0, ',', '"', '' ) ) ) {

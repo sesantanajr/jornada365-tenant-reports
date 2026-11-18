@@ -44,42 +44,39 @@ final class Conditional_Access extends Report_Base {
 	public function step( array $state, array $params, float $deadline ): array {
 		if ( 0 === $state['phase'] ) {
 			try {
-				$state['policies'] = $this->graph->get_all( '/v1.0/identity/conditionalAccess/policies' );
+				if ( ! $this->fetch_collection( $state, 'policies', '/v1.0/identity/conditionalAccess/policies', $deadline ) ) {
+					return $this->pending( $state, 'Carregando políticas de Acesso Condicional…' );
+				}
 			} catch ( Graph_Exception $e ) {
 				if ( $e->is_forbidden() || $e->is_license_gate() ) {
 					throw new Graph_Exception( 'Acesso Condicional indisponível: ' . $e->getMessage() . ' (requer Policy.Read.All e Entra ID P1).', $e->getCode(), $e->graph_code() );
 				}
 				throw $e;
 			}
-			try {
-				$state['locations'] = [];
-				foreach ( $this->graph->get_all( '/v1.0/identity/conditionalAccess/namedLocations?$select=id,displayName' ) as $loc ) {
-					$state['locations'][ strtolower( (string) $loc['id'] ) ] = (string) $loc['displayName'];
+
+			$lookups = [
+				'locations' => [ '/v1.0/identity/conditionalAccess/namedLocations?$select=id,displayName', 'Locais nomeados' ],
+				'strengths' => [ '/v1.0/policies/authenticationStrengthPolicies', 'Intensidades de autenticação' ],
+				'roles'     => [ '/v1.0/directoryRoleTemplates', 'Modelos de função' ],
+			];
+			foreach ( $lookups as $key => [ $url, $label ] ) {
+				if ( isset( $state[ $key ] ) ) {
+					continue;
 				}
-			} catch ( Graph_Exception $e ) {
-				$this->warn( $state, 'Named locations: ' . $e->getMessage() );
-			}
-			try {
-				$state['strengths'] = [];
-				// v1.0 path is /policies/authenticationStrengthPolicies (only $filter is documented).
-				foreach ( $this->graph->get_all( '/v1.0/policies/authenticationStrengthPolicies' ) as $s ) {
-					$state['strengths'][ strtolower( (string) $s['id'] ) ] = (string) $s['displayName'];
+				try {
+					if ( ! $this->fetch_collection( $state, 'lookup_rows', $url, $deadline, [], static fn( $row ) => [ 'id' => strtolower( (string) $row['id'] ), 'name' => (string) ( $row['displayName'] ?? $row['id'] ) ] ) ) {
+						return $this->pending( $state, 'Carregando ' . $label . '…' );
+					}
+				} catch ( Graph_Exception $e ) {
+					$this->optional_error( $state, $label, $e );
 				}
-			} catch ( Graph_Exception $e ) {
-				$this->warn( $state, 'Authentication strengths: ' . $e->getMessage() );
-			}
-			try {
-				$state['roles'] = [];
-				foreach ( $this->graph->get_all( '/v1.0/directoryRoleTemplates' ) as $r ) { // no OData query options supported
-					$state['roles'][ strtolower( (string) $r['id'] ) ] = (string) $r['displayName'];
-				}
-			} catch ( Graph_Exception $e ) {
-				$this->warn( $state, 'Templates de função: ' . $e->getMessage() );
+				$state[ $key ] = array_column( $state['lookup_rows'], 'name', 'id' );
+				unset( $state['lookup_rows'], $state['lookup_rows_next'], $state['lookup_rows_done'] );
 			}
 			$state['phase'] = 1;
 		}
 
-		if ( 1 === $state['phase'] ) {
+		if ( ! isset( $state['principal_ids'] ) ) {
 			// Collect GUIDs for users/groups and app IDs.
 			$principals = [];
 			$apps       = [];
@@ -101,36 +98,62 @@ final class Conditional_Access extends Report_Base {
 				}
 			}
 
-			$state['names'] = [];
-			foreach ( array_chunk( array_keys( $principals ), 1000 ) as $chunk ) {
+			$state['principal_ids'] = array_keys( $principals );
+			$state['app_ids']       = array_keys( $apps );
+			$state['principal_idx'] = 0;
+			$state['app_idx']       = 0;
+			$state['names']         = [];
+			$state['appnames']      = [];
+		}
+
+		// Save each completed name lookup. Tenants with many targeted apps can span several steps.
+		try {
+			while ( $state['principal_idx'] < count( $state['principal_ids'] ) && ! $this->out_of_time( $deadline ) ) {
+				$chunk = array_slice( $state['principal_ids'], $state['principal_idx'], 1000 );
 				try {
 					$res = $this->graph->get_directory_objects( $chunk, [ 'user', 'group', 'directoryRole', 'servicePrincipal' ] );
 					foreach ( $res['value'] ?? [] as $o ) {
-						$type                                       = str_replace( '#microsoft.graph.', '', (string) ( $o['@odata.type'] ?? '' ) );
-						$state['names'][ strtolower( (string) $o['id'] ) ] = (string) ( $o['displayName'] ?? $o['userPrincipalName'] ?? $o['id'] ) . ( 'user' === $type && ! empty( $o['userPrincipalName'] ) ? ' <' . $o['userPrincipalName'] . '>' : '' );
+						$name = (string) ( $o['displayName'] ?? $o['userPrincipalName'] ?? $o['id'] );
+						if ( '#microsoft.graph.user' === ( $o['@odata.type'] ?? '' ) && ! empty( $o['userPrincipalName'] ) ) {
+							$name .= ' <' . $o['userPrincipalName'] . '>';
+						}
+						$state['names'][ strtolower( (string) $o['id'] ) ] = $name;
 					}
 				} catch ( Graph_Exception $e ) {
-					$this->warn( $state, 'Resolução de nomes (getByIds): ' . $e->getMessage() );
+					$this->optional_error( $state, 'Resolução de nomes (getByIds)', $e );
 				}
+				$state['principal_idx'] += count( $chunk );
 			}
-
-			$state['appnames'] = [];
-			foreach ( array_chunk( array_keys( $apps ), 15 ) as $chunk ) {
-				$filter = implode( ',', array_map( fn( $a ) => "'" . $a . "'", $chunk ) );
+			while ( $state['app_idx'] < count( $state['app_ids'] ) && ! $this->out_of_time( $deadline ) ) {
+				$chunk  = array_slice( $state['app_ids'], $state['app_idx'], 15 );
+				$filter = implode( ',', array_map( static fn( $id ) => "'" . $id . "'", $chunk ) );
 				try {
 					$res = $this->graph->get( '/v1.0/servicePrincipals?$select=appId,displayName&$filter=appId in (' . rawurlencode( $filter ) . ')' );
 					foreach ( $res['value'] ?? [] as $sp ) {
 						$state['appnames'][ strtolower( (string) $sp['appId'] ) ] = (string) $sp['displayName'];
 					}
 				} catch ( Graph_Exception $e ) {
-					$this->warn( $state, 'Resolução de aplicativos: ' . $e->getMessage() );
+					$this->optional_error( $state, 'Resolução de aplicativos', $e );
 				}
+				$state['app_idx'] += count( $chunk );
 			}
-			$state['phase'] = 2;
+		} catch ( \J365TP\Graph_Throttled $error ) {
+			$this->pause_read( $state, $error->retry_after, $error->reason );
+		}
+		if ( $state['principal_idx'] < count( $state['principal_ids'] ) || $state['app_idx'] < count( $state['app_ids'] ) ) {
+			return $this->pending( $state, 'Resolvendo nomes nas políticas…' );
 		}
 
 		$n = count( $state['policies'] );
 		return [ 'state' => $state, 'progress' => $n, 'total' => $n, 'done' => true, 'message' => 'Concluído' ];
+	}
+
+
+	private function pending( array $state, string $message ): array {
+		$progress = count( $state['policies'] ?? [] ) + count( $state['lookup_rows'] ?? [] )
+			+ count( $state['locations'] ?? [] ) + count( $state['strengths'] ?? [] ) + count( $state['roles'] ?? [] )
+			+ ( $state['principal_idx'] ?? 0 ) + ( $state['app_idx'] ?? 0 );
+		return [ 'state' => $state, 'progress' => $progress, 'total' => 0, 'done' => false, 'message' => $message ];
 	}
 
 	public function finalize( array $state, array $params ): array {

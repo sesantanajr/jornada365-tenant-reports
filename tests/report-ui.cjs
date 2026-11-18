@@ -14,11 +14,19 @@ class TestElement {
     this.tag = tag;
     this.attrs = attrs || {};
     this.children = [];
+    this.classList = { add() {}, remove() {} };
+    this.style = {};
     this.scrollLeft = 0;
     this.scrollTop = 0;
     this.append(...children);
   }
   set innerHTML(value) { this.children = []; }
+  get firstChild() { return this.children[0]; }
+  setAttribute(name, value) { this.attrs[name] = value; }
+  removeAttribute(name) { delete this.attrs[name]; }
+  querySelector() { return null; }
+  focus() {}
+  scrollIntoView() {}
   append(...children) { this.children.push(...children.flat().filter((child) => child !== null && child !== undefined)); }
   replaceChildren(...children) {
     this.children = [];
@@ -30,7 +38,7 @@ class TestElement {
 function environment(fetch, runBoot = false, putTimer = setTimeout) {
   const root = new TestElement('root', null, []);
   const context = {
-    window: { J365TP: { restUrl: 'https://example.test/', authenticated: runBoot } },
+    window: { crypto: require('node:crypto').webcrypto, J365TP: { restUrl: 'https://example.test/', authenticated: runBoot } },
     document: {
       cookie: '', documentElement: { dataset: {} }, querySelector: () => null,
       getElementById: () => root, createTextNode: (text) => text, addEventListener() {},
@@ -43,7 +51,7 @@ function environment(fetch, runBoot = false, putTimer = setTimeout) {
   J.h = (tag, attrs, ...children) => new TestElement(tag, attrs, children);
   J.svg = () => null;
   // Expose private interfaces to the test without booting the full account page.
-  const source = runBoot ? portal : portal.slice(0, portal.indexOf(boot)) + '  window.testUi = { DataTable, fetchReport, followJob };\n})();';
+  const source = runBoot ? portal : portal.slice(0, portal.indexOf(boot)) + '  window.testUi = { DataTable, fetchReport, followJob, reportPanel };\n})();';
   vm.runInNewContext(source, context);
   return { root, ...J, ...context.window.testUi };
 }
@@ -92,6 +100,50 @@ async function main() {
   assert.deepEqual(trace, ['/reports/devices', '/jobs/same/run', '/jobs/same/run', '/jobs/same/result']);
   assert.ok(delays.includes(171000));
 
+  const starts = [];
+  let steps = 0;
+  const recovered = environment(async (url, req) => {
+    if (url.includes('reports/')) {
+      starts.push(JSON.parse(req.body));
+      if (starts.length === 1) throw new TypeError('connection reset after insert');
+      return json({ job: { job_id: 'restored', status: 'pending' } });
+    }
+    if (url.endsWith('/run')) {
+      if (++steps === 1) return { ...json(null), json: async () => { throw new SyntaxError('truncated JSON'); } };
+      return json({ job_id: 'restored', status: 'done' });
+    }
+    return json({ rows: [] });
+  }, false, (fn, ms) => setTimeout(fn, ms < 2000 ? 0 : 1000));
+  const seen = [];
+  await recovered.fetchReport('groups', {}, false, (job) => seen.push(job.message), new AbortController().signal);
+  assert.equal(starts.length, 2);
+  assert.match(starts[0].request_id, /^[\da-f-]{36}$/);
+  assert.equal(starts[0].request_id, starts[1].request_id);
+  assert.equal(steps, 2);
+  assert.ok(seen.includes('Nova tentativa em 2 s…'));
+
+  let deniedStarts = 0;
+  const denied = environment(async () => { deniedStarts++; return json({ message: 'Forbidden' }, 403); });
+  await assert.rejects(denied.fetchReport('groups', {}, false, () => {}, new AbortController().signal), (e) => e.status === 403);
+  assert.equal(deniedStarts, 1);
+
+  const nextTick = () => new Promise((resolve) => setImmediate(resolve));
+  let served = 0;
+  const refreshed = environment(async (url) => {
+    if (url.endsWith('/result')) return json({ _meta: { generated_at: '2026-03-01T09:00:00Z' }, rows: ['cached'] });
+    if (served++) return json({ message: 'Denied' }, 403);
+    return json({ job: { job_id: 'first', status: 'done' } });
+  });
+  const panel = refreshed.reportPanel('groups', {}, 'Grupos', (p) => p.rows.join(' '));
+  await nextTick();
+  const [hero, , feedback, reportBody] = panel.children;
+  assert.equal(reportBody.children[0], 'cached');
+  const refresh = hero.children.find((el) => el.attrs?.class === 'rp-tools').children.find((el) => el?.attrs?.title);
+  await refresh.attrs.onclick();
+  assert.equal(reportBody.children[0], 'cached');
+  assert.equal(feedback.hidden, false);
+  assert.equal(feedback.children[0].children[0], 'Denied');
+
   let deliveries = 0;
   const lostResult = environment(() => {
     deliveries++;
@@ -110,13 +162,22 @@ async function main() {
   assert.match(renderedTable.attrs.style, /--table-min: 145px/);
   viewport.scrollLeft = 90;
   const header = viewport.children[0].children[0].children[0].children[0];
-  header.attrs.onclick();
+  assert.equal(header.children[0].tag, 'button');
+  header.children[0].attrs.onclick();
+  assert.equal(viewport.children[0].children[0].children[0].children[0].attrs['aria-sort'], 'ascending');
   assert.equal(sortKeys, rows.length);
   assert.equal(viewport.scrollLeft, 90);
   const firstSortedCell = viewport.children[0].children[1].children[0].children[0];
   assert.equal(firstSortedCell.textContent, '0');
+  renderedTable.setSearch('missing');
+  const empty = renderedTable.children.find((item) => item.attrs.class === 'dt-empty');
+  assert.equal(empty.hidden, false);
+  assert.equal(empty.children[0].children[0], 'Nenhum resultado para os filtros atuais.');
+  empty.children[1].attrs.onclick();
+  assert.equal(empty.hidden, true);
+  assert.equal(renderedTable.currentRows().length, rows.length);
 
-  console.log('Report UI checks passed (request deadline, retry headers, bootstrap recovery, shared polling/cancellation, 10,000-row table).');
+  console.log('Report UI checks passed (idempotent startup retry, malformed polls, permissions, refresh recovery, shared cancellation, sortable and filterable 10,000-row table).');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

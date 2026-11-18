@@ -87,7 +87,7 @@ final class Jobs {
 	/**
 	 * @param array $session Session::current() view (tenant_id, owner, data_key, …)
 	 */
-	public static function start( array $session, string $type, array $params, bool $action = false ): array {
+	public static function start( array $session, string $type, array $params, bool $action = false, string $request_id = '' ): array {
 		$class = $action ? self::action_class( $type ) : self::report_class( $type );
 		if ( ! $class ) {
 			throw new \InvalidArgumentException( $action ? 'Ação indisponível.' : 'Relatório desconhecido.' );
@@ -95,43 +95,66 @@ final class Jobs {
 		self::purge_old();
 		global $wpdb;
 		$table  = Installer::table( 'jobs' );
-		$active = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE user_oid = %s AND status IN ('pending','running')", $session['owner'] ) );
-		if ( $active >= self::MAX_ACTIVE ) {
-			// The oldest unfinished work of this session was abandoned (the user moved on): drop it.
-			$old = $wpdb->get_col( $wpdb->prepare( "SELECT job_id FROM {$table} WHERE user_oid = %s AND status IN ('pending','running') ORDER BY updated_at ASC LIMIT %d", $session['owner'], $active - self::MAX_ACTIVE + 1 ) );
-			foreach ( (array) $old as $old_id ) {
-				$wpdb->delete( $table, [ 'job_id' => (string) $old_id ] );
-			}
-		}
 		/** @var Reports\Report_Base $report */
 		$report = new $class( $session['tenant_id'] );
 		$params = $report->normalize_params( $params );
 
-		$job_id = wp_generate_uuid4();
-		$now    = gmdate( 'Y-m-d H:i:s' );
-		$created = $wpdb->insert(
-			Installer::table( 'jobs' ),
-			[
-				'job_id'     => $job_id,
-				'tenant_id'  => strtolower( $session['tenant_id'] ),
-				'user_oid'   => $session['owner'],
-				'job_type'   => $type,
-				'params'     => null,
-				'state'      => self::seal( [ 'params' => $params, 'state' => $report->initial_state( $params ) ], $session['data_key'] ),
-				'status'     => 'pending',
-				'progress'   => 0,
-				'total'      => 0,
-				'message'    => 'Iniciando…',
-				'cache_key'  => null,
-				'created_at' => $now,
-				'updated_at' => $now,
-			]
-		);
+		$deduplicate = ! $action && '' !== $request_id;
+		if ( $deduplicate ) {
+			if ( ! wp_is_uuid( $request_id, 4 ) ) {
+				throw new \InvalidArgumentException( 'Identificador de solicitação inválido.' );
+			}
+			// A lost start response can be retried with the same UUID. Bind its job ID to
+			// the session and normalized query so another user or report cannot claim it.
+			$hash   = hash_hmac( 'sha256', wp_json_encode( [ strtolower( $request_id ), $type, $params ] ), $session['data_key'] );
+			$job_id = sprintf( '%s-%s-8%s-8%s-%s', substr( $hash, 0, 8 ), substr( $hash, 8, 4 ), substr( $hash, 12, 3 ), substr( $hash, 15, 3 ), substr( $hash, 18, 12 ) );
+			$row    = self::get( $job_id, $session );
+			if ( $row ) {
+				return [ 'job' => self::public_view( $row ) ];
+			}
+		} else {
+			$job_id = wp_generate_uuid4();
+		}
+		$active = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE user_oid = %s AND status IN ('pending','running')", $session['owner'] ) );
+		if ( $active >= self::MAX_ACTIVE ) {
+			// The oldest job may be processing a request or waiting for Graph's Retry-After.
+			// Keep its progress and let the new report retry when there is capacity.
+			throw new Graph_Exception( 'Há várias consultas em andamento. Aguarde a conclusão e tente novamente.', 429, 'job_capacity' );
+		}
+		$now = gmdate( 'Y-m-d H:i:s' );
+		$row = [
+			'job_id'     => $job_id,
+			'tenant_id'  => strtolower( $session['tenant_id'] ),
+			'user_oid'   => $session['owner'],
+			'job_type'   => $type,
+			'params'     => null,
+			'state'      => self::seal( [ 'params' => $params, 'state' => $report->initial_state( $params ) ], $session['data_key'] ),
+			'status'     => 'pending',
+			'progress'   => 0,
+			'total'      => 0,
+			'message'    => 'Iniciando…',
+			'cache_key'  => null,
+			'created_at' => $now,
+			'updated_at' => $now,
+		];
+		$previous = $deduplicate ? $wpdb->suppress_errors( true ) : null;
+		try {
+			$created = $wpdb->insert( $table, $row );
+		} finally {
+			if ( $deduplicate ) {
+				$wpdb->suppress_errors( $previous );
+			}
+		}
 		if ( false === $created ) {
+			// A simultaneous retry can win the primary-key insert between SELECT and INSERT.
+			$row = $deduplicate ? self::get( $job_id, $session ) : null;
+			if ( $row ) {
+				return [ 'job' => self::public_view( $row ) ];
+			}
 			throw new \RuntimeException( 'Não foi possível iniciar o relatório. Verifique o banco de dados do WordPress.' );
 		}
 		Audit::log( 'report_start', $session['tenant_id'], $session['upn'], [ 'report' => $type ] );
-		return [ 'job' => self::public_view( self::get( $job_id, $session ) ) ];
+		return [ 'job' => self::public_view( $row ) ];
 	}
 
 	/** A job is only visible to the session that created it. */

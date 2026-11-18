@@ -1,5 +1,7 @@
 # Segurança
 
-Relate vulnerabilidades em privado ao mantenedor. No GitHub, use a guia **Security** e a opção de relato privado quando estiver habilitada. Inclua a versão, o impacto e passos reproduzíveis com dados de teste.
+Para relatar uma vulnerabilidade, abra a guia **Security** do repositório e use **Report a vulnerability**, se a opção estiver disponível. Caso precise de outro canal, abra uma issue pedindo um meio de contato privado e reserve os detalhes técnicos para esse canal.
 
-Mantenha o Portal e o Bridge sob HTTPS. Gere um novo token do Bridge no painel quando trocar de operador ou atualizar da série 1.0. Se um token vazar, revogue-o no painel e gere outro. Use um tenant de homologação para testar permissões Microsoft ou ações que alteram dispositivos e correio.
+No relato privado, informe a versão do plugin, do WordPress e do PHP, o recurso afetado, o impacto observado e um exemplo com dados fictícios. Remova tokens, cookies, cabeçalhos de autorização e identificadores pessoais das evidências.
+
+Para validar uma correção de permissões ou de ações do Intune e do Exchange, use uma instalação WordPress em HTTPS e recursos de um tenant de homologação.

@@ -75,7 +75,7 @@ final class App_Security extends Report_Base {
 					'scope'       => trim( (string) ( $g['scope'] ?? '' ) ),
 				] );
 			} catch ( Graph_Exception $e ) {
-				$this->warn( $state, 'Consentimentos OAuth (oauth2PermissionGrants) indisponíveis: ' . $e->getMessage() );
+				$this->optional_error( $state, 'Consentimentos OAuth (oauth2PermissionGrants) indisponíveis', $e );
 				$state['grants'] = [];
 				$done            = true;
 			}

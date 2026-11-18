@@ -124,10 +124,13 @@
         cache: 'no-store',
         signal: controller.signal,
       });
-      return await res.json();
+      const body = await res.json();
+      if (!body || typeof body !== 'object') return { error: 'invalid_response', status: res.status };
+      if (!body.access_token) body.status = res.status;
+      return body;
     } catch (e) {
       if (!res || controller.signal.aborted) return { error: 'network', error_description: e.message };
-      return { error: 'invalid_response' };
+      return { error: 'invalid_response', status: res.status };
     } finally {
       clearTimeout(timer);
     }
@@ -218,13 +221,24 @@
     if (!tok.access_token) {
       const desc = String(tok.error_description || '');
       const consent = /AADSTS65001|AADSTS90094|AADSTS65004/.test(desc) || tok.error === 'consent_required';
-      const e = consent ? Object.assign(new Error(desc), { code: 'consent_needed' }) : reauthError(tok.error);
+      let e;
+      if (consent) e = Object.assign(new Error(desc || t('Autorização não concluída')), { code: 'consent_needed', status: 403 });
+      else if (['invalid_grant', 'interaction_required', 'login_required', 'account_selection_required'].includes(tok.error)) e = reauthError(tok.error);
+      else {
+        // A temporary failure at the token endpoint does not end the Microsoft session.
+        const temporary = ['network', 'temporarily_unavailable', 'server_error'].includes(tok.error);
+        const status = temporary && !(tok.status >= 500 || tok.status === 429) ? 503 : (tok.status >= 400 ? tok.status : 503);
+        e = Object.assign(new Error(t('Não foi possível consultar a Microsoft agora. Tente novamente.')), { status, code: tok.error });
+      }
       e.ms = (desc.match(/AADSTS\d+/) || [''])[0];
       throw e;
     }
-    keep(st, res, tok);
-    save(st);
-    return st.tokens[res].at;
+    // A second resource may have finished refreshing while this request was in flight.
+    const latest = state();
+    if (!latest || latest.tid !== st.tid || latest.clientId !== st.clientId || latest.account?.oid !== st.account?.oid) throw reauthError('session_changed');
+    keep(latest, res, tok);
+    save(latest);
+    return latest.tokens[res].at;
   }
 
   /** A valid access token for 'graph' or 'exo' (renewed with the refresh token when needed). */
@@ -237,13 +251,12 @@
     return inflight[res];
   }
 
-  /** Headers for the portal API: Graph always, Exchange Online when this tab already holds it. */
+  /** Graph reports never wait for the renewal of an unrelated Exchange token. */
   async function headers(needExo = false) {
     const out = { 'X-J365-Graph': await token('graph') };
-    const st = state();
-    if (needExo || (st && st.tokens && st.tokens.exo)) {
-      try { out['X-J365-Exo'] = await token('exo'); } catch (e) { if (needExo) throw e; }
-    }
+    const cached = state()?.tokens?.exo;
+    if (needExo) out['X-J365-Exo'] = await token('exo');
+    else if (cached && cached.exp - Date.now() > SKEW) out['X-J365-Exo'] = cached.at;
     return out;
   }
 

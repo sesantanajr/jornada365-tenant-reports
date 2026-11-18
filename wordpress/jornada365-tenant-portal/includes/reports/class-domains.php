@@ -1,8 +1,6 @@
 <?php
 namespace J365TP\Reports;
 
-use J365TP\Graph_Exception;
-
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -13,9 +11,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class Domains extends Report_Base {
 
 	public function step( array $state, array $params, float $deadline ): array {
-		$rows = [];
-		foreach ( $this->graph->get_all( '/v1.0/domains' ) as $d ) {
-			$rows[] = [
+		$complete = $this->fetch_collection( $state, 'rows', '/v1.0/domains', $deadline, [], static function ( array $d ): array {
+			return [
 				'name'            => (string) $d['id'],
 				'isDefault'       => (bool) ( $d['isDefault'] ?? false ),
 				'isInitial'       => (bool) ( $d['isInitial'] ?? false ),
@@ -26,7 +23,11 @@ final class Domains extends Report_Base {
 				'adminManaged'    => (bool) ( $d['isAdminManaged'] ?? false ),
 				'passwordValidity' => (int) ( $d['passwordValidityPeriodInDays'] ?? 0 ),
 			];
+		} );
+		if ( ! $complete ) {
+			return [ 'state' => $state, 'progress' => count( $state['rows'] ), 'total' => 0, 'done' => false, 'message' => 'Lendo domínios…' ];
 		}
+		$rows = $state['rows'];
 		usort( $rows, fn( $a, $b ) => ( $b['isDefault'] <=> $a['isDefault'] ) ?: strcmp( $a['name'], $b['name'] ) );
 
 		$state['rows']    = $rows;

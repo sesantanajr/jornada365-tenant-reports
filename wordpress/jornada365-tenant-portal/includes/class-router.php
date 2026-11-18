@@ -287,7 +287,7 @@ final class Router {
 		}
 		if ( $vm['perms'] ) {
 			$html .= '<details class="disclosure"><summary>' . esc_html( self::t( 'O que o administrador vai aprovar' ) ) . '</summary><div class="disclosure-body">' . self::permission_groups_html( (array) $vm['missing'] )
-				. '<p class="fine">' . str_replace( '{app}', '<strong>' . esc_html( Settings::APP_NAME ) . '</strong>', esc_html( self::t( 'Somente leitura. Nada é gravado no seu tenant. Para remover, exclua o aplicativo {app} em Entra ID → Aplicativos empresariais.' ) ) ) . '</p></div></details>';
+				. '<p class="fine">' . str_replace( '{app}', '<strong>' . esc_html( Settings::APP_NAME ) . '</strong>', esc_html( self::t( 'Os relatórios consultam dados. Os módulos de ação podem solicitar permissões adicionais. O administrador pode revogar o acesso de {app} no Microsoft Entra ID.' ) ) ) . '</p></div></details>';
 		}
 		$rows = '';
 		$text = [];
@@ -327,7 +327,7 @@ final class Router {
 			. '<a class="btn-solid" href="' . esc_url( $share_url ) . '">' . esc_html( self::t( 'Aprovar com conta de administrador' ) ) . '</a></section>'
 			. '</div>'
 			. '<details class="disclosure"><summary>' . esc_html( self::t( 'O que o administrador vai aprovar' ) ) . '</summary><div class="disclosure-body">' . self::permission_groups_html()
-			. '<p class="fine">' . str_replace( '{app}', $app, esc_html( self::t( 'Somente leitura. Nada é gravado no seu tenant. Para remover, exclua o aplicativo {app} em Entra ID → Aplicativos empresariais.' ) ) ) . '</p></div></details>'
+			. '<p class="fine">' . str_replace( '{app}', $app, esc_html( self::t( 'Os relatórios consultam dados. Os módulos de ação podem solicitar permissões adicionais. O administrador pode revogar o acesso de {app} no Microsoft Entra ID.' ) ) ) . '</p></div></details>'
 			. '<p class="tenant-line">' . esc_html( self::t( 'Tenant' ) ) . ': <code>' . esc_html( $tenant_id ) . '</code></p>';
 
 		$actions = '<a class="btn-ghost" href="' . esc_url( Request::login_url() ) . '">' . esc_html( self::t( 'Entrar com outra conta' ) ) . '</a><a class="btn-ghost" href="' . esc_url( Request::portal_url() ) . '">' . esc_html( self::t( 'Voltar ao início' ) ) . '</a>';
@@ -381,7 +381,7 @@ final class Router {
 			$foot[] = '<a href="mailto:' . esc_attr( $support ) . '">' . esc_html( self::t( 'Suporte' ) ) . '</a>';
 		}
 		$foot[] = esc_html( self::t( 'Protegido pelo Microsoft Entra ID' ) );
-		$foot[] = esc_html( self::t( 'Nada fica salvo no servidor' ) );
+		$foot[] = esc_html( self::t( 'Processamento temporário cifrado' ) );
 		$credit = '<a class="sp-credit" href="' . esc_url( Settings::CREATOR_LINKEDIN ) . '" target="_blank" rel="noopener">'
 			. '<img src="' . esc_url( J365TP_URL . 'assets/img/creator-96.webp' ) . '" alt="" width="28" height="28" decoding="async">'
 			. '<span>' . esc_html( self::t( 'Projeto criado por' ) ) . ' <b>' . esc_html( Settings::CREATOR_NAME ) . '</b></span></a>';

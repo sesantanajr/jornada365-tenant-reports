@@ -46,13 +46,14 @@
   const REPORT_REQUEST_MS = 45 * 1000;
   const transient = (e) => e && !['unauthenticated', 'reauth'].includes(e.message) && (!e.status || [408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524].includes(e.status));
 
-  async function pollJob(job, onProgress, opts) {
-    for (let tries = 1; ; tries++) {
-      try { return await api('jobs/' + job.job_id + '/run', { ...opts, method: 'POST' }); } catch (e) {
-        if (opts.signal?.aborted || !transient(e) || tries > 6) throw e;
-        onProgress({ ...job, message: 'Conexão instável — tentando novamente…' });
-        const delay = Math.min(15000, 1500 * 2 ** (tries - 1));
-        await sleep(Math.max(delay, Math.min(REPORT_WAIT_MS, (e.retryAfter || 0) * 1000)), opts.signal);
+  async function retryJobRequest(send, onRetry, signal, retries) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await send(); } catch (e) {
+        if (signal?.aborted || !transient(e) || attempt >= retries) throw e;
+        const delay = Math.max(Math.min(15000, 1500 * 2 ** attempt), (e.retryAfter || 0) * 1000);
+        if (delay > REPORT_WAIT_MS) throw e;
+        onRetry(Math.ceil(delay / 1000));
+        await sleep(delay, signal);
       }
     }
   }
@@ -60,7 +61,13 @@
   function runReport(type, params, onProgress, signal) {
     return withDeadline(REPORT_WAIT_MS, signal, async (deadline) => {
       const opts = { signal: deadline, timeout: REPORT_REQUEST_MS };
-      const start = await api('reports/' + type, { ...opts, method: 'POST', body: { params } });
+      const requestId = window.crypto?.randomUUID?.();
+      const body = requestId ? { params, request_id: requestId } : { params };
+      const start = await retryJobRequest(
+        () => api('reports/' + type, { ...opts, method: 'POST', body }),
+        (seconds) => onProgress({ message: t('Nova tentativa em {n} s…', { n: seconds }) }),
+        deadline, requestId ? 3 : 0
+      );
       return followJob(start?.job, onProgress, opts);
     }, new Error(t('O relatório excedeu o tempo de espera. Gere novamente para tentar.')));
   }
@@ -81,7 +88,11 @@
       } else if (idle) {
         await sleep(Math.min(5000, 1000 * idle), opts.signal);
       }
-      const next = await pollJob(job, onProgress, opts);
+      const next = await retryJobRequest(
+        () => api('jobs/' + id + '/run', { ...opts, method: 'POST' }),
+        (seconds) => onProgress({ ...job, message: t('Nova tentativa em {n} s…', { n: seconds }) }),
+        opts.signal, 6
+      );
       idle = next?.status === job.status && next.progress === job.progress ? idle + 1 : 0;
       job = next;
     }
@@ -516,7 +527,7 @@
       if (sec.subtitle) { sum.height(r, 30); sum.set(r, 1, /^\s*(fonte|source|fuente)\s*:/i.test(sec.subtitle) ? sec.subtitle : t('Fonte: {s}', { s: sec.subtitle }), st.note).merge(r, 1, r, COLS); r += 2; }
       if (multi) r++;
     }
-    sum.height(r, 28).set(r, 1, t('Gerado pelo {s} no seu navegador — somente leitura, nada fica salvo no servidor. Relatórios de uso da Microsoft podem ter até 48 h de atraso.', { s: APP }), st.note).merge(r, 1, r, COLS);
+    sum.height(r, 28).set(r, 1, t('Arquivo gerado por {s} nesta aba. Os dados de uso da Microsoft podem refletir dias anteriores.', { s: APP }), st.note).merge(r, 1, r, COLS);
 
     /* ---- data sheets (one per table) */
     for (const sec of sections) {
@@ -611,7 +622,7 @@
         });
       }
       c += 1;
-      cover.height(c, 30).set(c, 1, t('Montado no seu navegador a partir do Microsoft Graph (somente leitura). O {s} não guarda relatórios no servidor.', { s: APP }), st.note).merge(c, 1, c, COLS);
+      cover.height(c, 30).set(c, 1, t('Planilha montada nesta aba com os dados consultados pelo portal.'), st.note).merge(c, 1, c, COLS);
     }
 
     /* ---- about sheet */
@@ -622,8 +633,8 @@
       ['Relatório', title], ['Organização', ten.name || '—'], ['Domínio', ten.domain || '—'], ['ID do tenant', ten.id || '—'],
       ['Gerado em', fmtDate(when.toISOString())], ['Gerado por', user.upn || '—'], ['Escopo', scope || '—'],
       ['Planilhas', [...(cover ? [cover.name] : []), sum.name, ...dataSheets.map((x) => x.sheetName), t('Sobre')].join(' · ')],
-      ['Origem dos dados', t('Microsoft Graph (somente leitura), consultado no momento da geração com as permissões aprovadas no seu tenant.')],
-      ['Privacidade', t('O arquivo foi montado no seu navegador. O {s} não guarda relatórios no servidor.', { s: APP })],
+      ['Origem dos dados', t('Microsoft Graph, com as permissões de leitura disponíveis ao gerar cada relatório.')],
+      ['Privacidade', t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.')],
       ['Filtros', t('Cada planilha de dados é uma tabela do Excel: use os botões de filtro e ordenação no cabeçalho.')],
       ['Versão', APP + ' v' + (CFG.version || '')],
     ];
@@ -791,13 +802,14 @@
     const chips = h('div', { class: 'chips' });
     let qTimer = null; // large tenants: don't filter on every keystroke
     const search = h('input', { type: 'search', placeholder: 'Pesquisar…', 'aria-label': 'Pesquisar…', oninput: (e) => { const v = e.target.value.toLowerCase(); clearTimeout(qTimer); qTimer = setTimeout(() => { state.q = v; state.page = 0; draw(false); }, rows.length > 2000 ? 220 : 40); } });
-    const count = h('span', { class: 'muted small count' });
+    const count = h('span', { class: 'muted small count', role: 'status', 'aria-atomic': 'true' });
     const btnCsv = h('button', { class: 'btn sm', onclick: () => exportRows(current(), columns, name, 'csv') }, icon('download'), raw('CSV'));
     const btnXlsx = h('button', { class: 'btn sm xl', onclick: (e) => { const b = e.currentTarget; b.disabled = true; exportExcel(wrap, current(), columns, name, describe()).finally(() => { b.disabled = false; }); } }, icon('sheet'), raw('Excel'));
     toolbar.append(h('label', { class: 'search' }, icon('search'), search), count, h('div', { class: 'tb-actions' }, btnCsv, btnXlsx));
     const tablewrap = h('div', { class: 'tablewrap', tabindex: '0', role: 'region', 'aria-label': 'Tabela de resultados' });
+    const emptyState = h('div', { class: 'dt-empty', hidden: true });
     const pager = h('div', { class: 'pager' });
-    wrap.append(...(segBar ? [segBar] : []), toolbar, chips, tablewrap, pager);
+    wrap.append(...(segBar ? [segBar] : []), toolbar, chips, tablewrap, emptyState, pager);
 
     const keys = searchKeys || columns.map((c) => c.key).filter(Boolean);
     const segItem = () => (segments ? segments.items.find((x) => x.id === state.seg) : null);
@@ -814,12 +826,12 @@
         const col = columns.find((c) => c.key === state.sort);
         const val = (r) => (col.sortValue ? col.sortValue(r) : (col.value ? col.value(r) : r[col.key]));
         const empty = (value) => value === null || value === undefined || value === '';
-      out = out.map((row) => ({ row, value: val(row) })).sort(({ value: x }, { value: y }) => {
-        if (x === y || (empty(x) && empty(y))) return 0;
-        if (empty(x)) return 1;
-        if (empty(y)) return -1;
-        return (x > y ? 1 : -1) * state.dir;
-      }).map(({ row }) => row);
+        out = out.map((row) => ({ row, value: val(row) })).sort(({ value: x }, { value: y }) => {
+          if (x === y || (empty(x) && empty(y))) return 0;
+          if (empty(x)) return 1;
+          if (empty(y)) return -1;
+          return (x > y ? 1 : -1) * state.dir;
+        }).map(({ row }) => row);
       }
       return out;
     }
@@ -863,9 +875,38 @@
         all.indeterminate = on > 0 && on < pool.length;
         selTh = h('th', { class: 'sel' }, all);
       }
-      const thead = h('thead', null, h('tr', null, selTh, ...shown.map((c) => h('th', { class: state.sort === c.key ? 'sorted' : '', onclick: () => { if (state.sort === c.key) state.dir *= -1; else { state.sort = c.key; state.dir = 1; } draw(); } }, c.label, state.sort === c.key ? h('span', { class: 'arrow' }, raw(state.dir > 0 ? '▲' : '▼')) : null))));
+      const headings = shown.map((c, index) => {
+        if (!c.key || !c.label) return h('th', { scope: 'col' }, c.label);
+        const sorted = state.sort === c.key;
+        const sort = () => {
+          state.dir = sorted ? -state.dir : 1;
+          state.sort = c.key;
+          state.page = 0;
+          draw(false);
+          tablewrap.querySelector('[data-sort-column="' + index + '"]')?.focus({ preventScroll: true });
+        };
+        return h('th', { scope: 'col', class: sorted ? 'sorted' : '', 'aria-sort': sorted ? (state.dir > 0 ? 'ascending' : 'descending') : null },
+          h('button', { class: 'dt-sort', type: 'button', 'data-sort-column': index, onclick: sort }, c.label, h('span', { class: 'arrow', 'aria-hidden': 'true' }, raw(sorted ? (state.dir > 0 ? '▲' : '▼') : '↕'))));
+      });
+      const thead = h('thead', null, h('tr', null, selTh, ...headings));
       const tbody = h('tbody');
-      if (!slice.length) tbody.append(h('tr', null, h('td', { colspan: shown.length + (select ? 1 : 0), class: 'muted empty' }, emptyText)));
+      emptyState.replaceChildren();
+      emptyState.hidden = slice.length > 0;
+      if (!slice.length) {
+        const filtered = rows.length > 0 && (state.q || state.filter || state.match || state.seg !== 'all');
+        const reset = () => {
+          clearTimeout(qTimer);
+          state.q = ''; search.value = ''; state.match = null; state.filter = null; state.page = 0;
+          if (segments && state.seg !== 'all' && segments.items.some((s) => s.id === 'all')) {
+            state.seg = 'all';
+            segments.onChange?.('all');
+          }
+          draw();
+          search.focus();
+        };
+        emptyState.append(h('p', null, filtered ? 'Nenhum resultado para os filtros atuais.' : emptyText));
+        if (filtered) emptyState.append(h('button', { class: 'btn sm', type: 'button', onclick: reset }, 'Limpar filtros'));
+      }
       for (const r of slice) {
         const tr = h('tr', onRowClick ? { class: 'clickable', tabindex: '0', onclick: () => onRowClick(r), onkeydown: (e) => { if (e.key === 'Enter') onRowClick(r); } } : null);
         if (select) {
@@ -915,11 +956,12 @@
     wrap.setSegment = (id) => { state.seg = id; state.page = 0; if (segments && segments.onChange) segments.onChange(id); draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     wrap.setMatch = (key, value, label) => {
       state.match = { key, value, label: String(label ?? value) };
+      clearTimeout(qTimer);
       state.filter = null; state.q = ''; search.value = ''; state.page = 0;
       if (segments && state.seg !== 'all' && segments.items.some((x) => x.id === 'all')) { state.seg = 'all'; if (segments.onChange) segments.onChange('all'); }
       draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    wrap.setSearch = (q) => { state.q = String(q || '').toLowerCase(); search.value = q || ''; state.page = 0; draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    wrap.setSearch = (q) => { clearTimeout(qTimer); state.q = String(q || '').toLowerCase(); search.value = q || ''; state.page = 0; draw(); wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     return wrap;
   }
 
@@ -1154,7 +1196,7 @@
       return pr;
     },
     async start(cap, body) {
-      try { return (await api('actions/' + cap, { method: 'POST', body })).job; }
+      try { return (await api('actions/' + cap, { method: 'POST', body, exo: cap === 'exchange' })).job; }
       catch (e) { if (e.data && e.data.code === 'j365_action_auth') { Actions.until[cap] = 0; const err = new Error(t('Autorize de novo: a autorização atual não cobre a duração desta execução.')); err.needAuth = true; throw err; } throw e; }
     },
     /** Explains a failed authorization (admin approval needed, popup blocked…) in a dialog. */
@@ -1217,7 +1259,7 @@
     const creator = window.J365Landing && window.J365Landing.creatorChip ? window.J365Landing.creatorChip('side-creator') : null;
     side.append(navEl, h('div', { class: 'side-foot' },
       (() => { const ls = langSwitch(); ls.classList.add('side-lang'); return ls; })(),
-      h('div', { class: 'side-priv', title: t('Somente leitura · relatórios só no seu navegador') }, icon('lock'), h('div', null, h('strong', null, 'Nada fica salvo no servidor'), h('span', null, 'Somente leitura · relatórios só no seu navegador'))),
+      h('div', { class: 'side-priv' }, icon('lock'), h('div', null, h('strong', null, 'Privacidade dos relatórios'), h('span', null, 'Processamento temporário cifrado'))),
       creator,
       h('span', { class: 'side-ver' }, raw('v' + CFG.version))));
 
@@ -1229,7 +1271,7 @@
         h('div', { class: 'tenant-txt' }, h('div', { class: 'tenant-name' }, raw(ten.name || ten.domain || ten.id)), h('div', { class: 'tenant-meta' }, raw((ten.domain ? ten.domain + ' · ' : '') + ten.id)))),
       h('div', { class: 'head-tools' },
         h('button', { class: 'btn sm hdr-xl', type: 'button', onclick: executiveDialog, title: t('Excel pronto para a diretoria: indicadores, gráficos, destaques e planilhas com filtros de cada área — montado no seu navegador.') }, icon('sheet'), h('span', null, 'Excel executivo')),
-        h('span', { class: 'priv-pill', title: t('Os relatórios são entregues direto ao seu navegador e não ficam gravados no servidor.') }, icon('lock'), h('span', null, 'Nada fica salvo no servidor')),
+        h('span', { class: 'priv-pill', title: t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.') }, icon('lock'), h('span', null, 'Processamento temporário cifrado')),
         langSwitch(), themeToggle(),
         h('div', { class: 'user-chip' },
           h('div', { class: 'user-meta' }, h('strong', null, raw(u.name || u.upn)), h('span', null, roleNames.length ? raw(list(roleNames, 1)) : raw(u.upn))),
@@ -1273,7 +1315,7 @@
     }
     const C = CFG.creator || {};
     const foot = h('footer', { class: 'app-foot' },
-      h('span', null, t('Sessão expira em {s} · relatórios só no seu navegador', { s: fmtDate(App.me.session.expiresAt) })),
+      h('span', null, t('Sessão expira em {s}', { s: fmtDate(App.me.session.expiresAt) })),
       h('span', null, h('a', { href: C.url || '#', target: '_blank', rel: 'noopener' }, 'Projeto criado por', ' ', raw(C.name || '')), raw(` · ${APP} v${CFG.version}`)));
     root.append(h('div', { class: 'app-bg', 'aria-hidden': 'true' }, h('i', { class: 'blob b1' }), h('i', { class: 'blob b2' })),
       h('div', { class: 'app-shell' }, side, h('main', { class: 'app-main' }, header, banner, permBanner, content, foot), h('div', { class: 'scrim', onclick: () => root.classList.remove('nav-open') })));
@@ -1342,8 +1384,10 @@
         h('div', { class: 'rp-txt' }, h2, opts.subtitle ? h('p', { class: 'rp-sub' }, opts.subtitle) : null, status)),
       ringBox, tools);
     const body = h('div', { class: 'rp-body' });
-    const bar = h('div', { class: 'progress indeterminate' }, h('i'));
-    panel.append(hero, bar, body);
+    const feedback = h('div', { class: 'rp-feedback', hidden: true });
+    const bar = h('div', { class: 'progress indeterminate', 'aria-hidden': 'true' }, h('i'));
+    let lastGenerated = '';
+    panel.append(hero, bar, feedback, body);
     const ctx = {
       panel,
       /** Title shown in the hero and used by the Excel export. */
@@ -1365,7 +1409,8 @@
       const meta = Object.assign({}, PANEL_META.get(panel));
       delete meta.error;
       PANEL_META.set(panel, meta);
-      body.innerHTML = '';
+      feedback.hidden = true;
+      feedback.replaceChildren();
       bar.style.display = '';
       bar.classList.add('indeterminate');
       bar.firstChild.style.width = '';
@@ -1374,26 +1419,29 @@
       body.setAttribute('aria-busy', 'true');
       panel.classList.add('loading');
       status.textContent = t('Consultando Microsoft Graph…');
-      body.append(skeleton());
+      if (!lastGenerated) body.replaceChildren(skeleton());
       try {
         const payload = await fetchReport(type, params, force, (job) => {
           if (job.total > 0) { bar.classList.remove('indeterminate'); bar.firstChild.style.width = Math.min(100, Math.round(100 * job.progress / job.total)) + '%'; }
           status.textContent = job.message ? t(job.message) : t('{n} processados…', { n: num(job.progress) });
         }, signal);
         bar.style.display = 'none';
-        body.innerHTML = '';
-        status.textContent = t('Gerado em {a} · só no seu navegador', { a: fmtDate(payload._meta?.generated_at) });
-        if (payload._meta?.warnings?.length) body.append(h('div', { class: 'alert warn' }, h('strong', null, 'Avisos: '), h('ul', { class: 'list' }, ...payload._meta.warnings.map((w) => h('li', null, w)))));
-        body.append(build(payload, ctx));
+        const content = build(payload, ctx);
+        const warnings = payload._meta?.warnings || [];
+        const notice = warnings.length ? h('div', { class: 'alert warn' }, h('strong', null, 'Avisos: '), h('ul', { class: 'list' }, ...warnings.map((w) => h('li', null, w)))) : null;
+        body.replaceChildren(...(notice ? [notice, content] : [content]));
+        lastGenerated = fmtDate(payload._meta?.generated_at);
+        status.textContent = t('Gerado em {s}', { s: lastGenerated });
         if (opts.ring) { let spec = null; try { spec = opts.ring(payload); } catch (e) { spec = null; } ctx.setRing(spec); }
       } catch (e) {
         if (e.message === 'unauthenticated') { PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { error: t('Sua sessão expirou. Entre novamente.') })); return; }
         bar.style.display = 'none';
-        status.textContent = '';
-        body.innerHTML = '';
+        status.textContent = lastGenerated ? t('Exibindo a última consulta concluída em {s}.', { s: lastGenerated }) : '';
+        if (!lastGenerated) body.replaceChildren();
         const message = signal.aborted ? t('Espera cancelada. Você pode gerar o relatório novamente.') : t(e.message);
-        body.append(h('div', { class: 'alert ' + (signal.aborted ? 'warn' : 'danger'), role: 'alert' }, raw(message)));
-        PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { error: message }));
+        feedback.hidden = false;
+        feedback.append(h('div', { class: 'alert ' + (signal.aborted || lastGenerated ? 'warn' : 'danger'), role: 'alert' }, raw(message)));
+        if (!lastGenerated) PANEL_META.set(panel, Object.assign({}, PANEL_META.get(panel), { error: message }));
       } finally {
         request = null;
         refresh.disabled = false;
@@ -1946,7 +1994,7 @@
     }
     box.append(table);
     return box;
-  }, { subtitle: 'Contagem de membros via $batch com ConsistencyLevel=eventual (members, user, group, device, owners). Tenants grandes podem levar alguns minutos na primeira execução.', ring: (p) => {
+  }, { subtitle: 'Compare o número de membros por grupo e encontre grupos vazios ou sem proprietário.', ring: (p) => {
     const app = p.rows.filter((r) => r.ownersApplicable !== false), ok = app.filter((r) => r.owners > 0).length, pc = pctOf(ok, app.length);
     return app.length ? { pct: pc, label: 'dos grupos com proprietário', caption: t('{n} vazios', { n: num(p.summary.empty) }), tone: toneFor(pc, 90, 75) } : null;
   } });
@@ -2343,7 +2391,7 @@
       progress({ message: 'Iniciando…', progress: 0, total: 0 });
       try {
         const job = await Actions.start(cap, payloadFn());
-        const res = await followJob(job, progress);
+        const res = await followJob(job, progress, { exo: cap === 'exchange' });
         setTitle(t('Resultado'));
         body.innerHTML = '';
         body.append(buildBody(res));
@@ -2839,7 +2887,7 @@
     box.append(table, bar);
     if (gate) box.append(h('div', { class: 'gate-foot' }, gate));
     return box;
-  }, { subtitle: 'Fonte: getMailboxUsageDetail (Microsoft Graph v1.0, CSV processado em memória) + licenças dos usuários. Ações: Exchange Online com a sua conta (ativar ou desativar o arquivo morto, expansão automática e processamento).', ring: (p) => {
+  }, { subtitle: 'Compare o uso das caixas de correio, encontre caixas próximas da cota e confira quais têm arquivo morto.', ring: (p) => {
     const s = p.summary || {}, ok = Math.max(0, (s.total || 0) - (s.near || 0)), pc = pctOf(ok, s.total);
     return s.total ? { pct: pc, label: 'das caixas abaixo de 80% da cota', caption: t('{n} sem enviar e-mails', { n: num((s.sendBlocked || 0) + (s.blocked || 0)) }), tone: toneFor(pc, 95, 85) } : null;
   } });
@@ -3054,12 +3102,12 @@
 
     /* Privacy & data */
     const facts = [
-      ['Relatórios', t('Processados em memória e entregues direto ao seu navegador. Ficam apenas nesta aba e somem ao sair ou fechar.')],
-      ['Processamento em etapas', t('Tenants grandes são lidos em etapas; o progresso fica cifrado com uma chave que só a sua sessão tem e é apagado ao entregar o resultado (no máximo {n} min).', { n: P.jobTtlMinutes || 15 })],
+      ['Relatórios', t('O WordPress mantém o processamento temporário cifrado. O resultado é removido do servidor na entrega.')],
+      ['Processamento em etapas', t('O progresso é cifrado com a chave da sessão. Consultas abandonadas entram na limpeza após {n} minutos de inatividade.', { n: P.jobTtlMinutes || 15 })],
       ['Sessão', t('Cookie cifrado (HttpOnly, Secure, SameSite) — sem sessão gravada no servidor. Sua função é revalidada no Entra ID a cada {n} min.', { n: P.roleCheckMinutes || 15 })],
-      ['Credenciais', t('Nenhuma senha passa pelo portal. O aplicativo usa certificado e tokens que existem só em memória.')],
+      ['Credenciais', t(CFG.tenancy === 'per_tenant' ? 'O login ocorre na Microsoft. Os tokens delegados ficam nesta aba e acompanham as chamadas autorizadas ao portal.' : 'O login ocorre na Microsoft. O aplicativo do operador usa a credencial configurada no WordPress.')],
       ['Registro de segurança', t('Pseudonimizado (sem nomes, e-mails ou IP completo) e apagado após {n} dias.', { n: P.auditDays || 30 })],
-      ['O que fica no servidor', t('Somente o ID do tenant (para permitir revogar), suas regras de homologação e o registro de segurança pseudonimizado.')],
+      ['O que fica no servidor', t('O WordPress mantém os identificadores e as configurações do tenant, as regras de acesso e o registro de segurança pseudonimizado.')],
     ];
     box.append(h('div', { class: 'panel' }, h('h2', null, 'Privacidade e dados'),
       h('dl', { class: 'kv' }, ...facts.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, raw(v))])),

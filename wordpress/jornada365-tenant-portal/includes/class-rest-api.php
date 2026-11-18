@@ -225,7 +225,11 @@ final class Rest_Api {
 		$body   = $request->get_json_params() ?: [];
 		$params = is_array( $body['params'] ?? null ) ? $body['params'] : [];
 		try {
-			return new WP_REST_Response( Jobs::start( $s, $type, $params ) );
+			$request_id = $body['request_id'] ?? '';
+			if ( ! is_string( $request_id ) ) {
+				throw new \InvalidArgumentException( 'Identificador de solicitação inválido.' );
+			}
+			return new WP_REST_Response( Jobs::start( $s, $type, $params, false, $request_id ) );
 		} catch ( \Throwable $e ) {
 			return $this->error( $e );
 		}

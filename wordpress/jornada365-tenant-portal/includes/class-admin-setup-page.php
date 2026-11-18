@@ -255,7 +255,7 @@ final class Admin_Setup_Page {
 			<div class="hero">
 				<?php if ( Brand::wordmark_url() ) : ?><img src="<?php echo esc_url( Brand::wordmark_url() ); ?>" alt="Jornada 365"><?php endif; ?>
 				<div><h1 style="margin:0"><?php echo esc_html( Settings::APP_NAME ); ?> — Assistente</h1>
-				<p class="muted" style="margin:4px 0 0">O registro do aplicativo é feito <strong>no próprio portal</strong>: abra o portal, clique em <em>Entrar com Microsoft 365</em> e entre com um Global Administrator do tenant da Jornada 365. O portal cria o <strong><?php echo esc_html( Settings::APP_NAME ); ?></strong> (multi-tenant, logo, certificado, permissões somente leitura), concede as permissões e já entra. Nenhum script, nenhum client secret.</p></div>
+				<p class="muted" style="margin:4px 0 0">O registro do aplicativo é feito <strong>no próprio portal</strong>: abra o portal, clique em <em>Entrar com Microsoft 365</em> e entre com um Global Administrator do tenant da Jornada 365. O portal cria o <strong><?php echo esc_html( Settings::APP_NAME ); ?></strong> (multi-tenant, com logo, certificado e permissões dos módulos habilitados), concede as permissões e já entra. Nenhum script, nenhum client secret.</p></div>
 			</div>
 			<?php if ( is_array( $notice ) ) : ?>
 				<div class="notice notice-<?php echo esc_attr( $notice['type'] ); ?> is-dismissible"><p><?php echo esc_html( $notice['msg'] ); ?></p></div>
@@ -367,7 +367,7 @@ final class Admin_Setup_Page {
 					<ul style="list-style:disc;margin-left:22px">
 						<li>O administrador entra pelo cliente público oficial <em>Microsoft Graph Command Line Tools</em> (o mesmo do <code>Connect-MgGraph</code>), por código de dispositivo ou pelo navegador, com apenas <code>Application.ReadWrite.All</code> e <code>DelegatedPermissionGrant.ReadWrite.All</code>.</li>
 						<li>Com essa autorização temporária (cifrada com uma chave que só o navegador dele completa, descartada no final) o portal cria no tenant do cliente: o registro de aplicativo <em>single-tenant</em> com o endereço de retorno abaixo, o logo, o aplicativo empresarial e a aprovação das permissões delegadas para a organização.</li>
-						<li>O servidor guarda apenas <strong>ID do tenant → ID do aplicativo</strong> (identificadores públicos). Os tokens de login ficam no navegador de quem entra; o servidor só os recebe a cada chamada, em memória.</li>
+						<li>O WordPress guarda o vínculo entre o <strong>ID do tenant e o ID do aplicativo</strong>, as configurações e a auditoria. O navegador envia os tokens nas chamadas autenticadas. O progresso e o resultado dos relatórios ficam cifrados temporariamente no servidor.</li>
 						<li>Se o código de dispositivo estiver bloqueado por Acesso Condicional, o assistente oferece <em>Entrar pelo navegador</em> e também a <em>criação manual</em> no Entra ID.</li>
 						<li>Para desconectar, o cliente exclui o aplicativo <?php echo esc_html( Settings::APP_NAME ); ?> no Entra ID dele. Para bloquear um tenant pelo lado do portal, use <a href="<?php echo esc_url( admin_url( 'admin.php?page=j365tp-tenants' ) ); ?>">Tenants → Revogar</a>.</li>
 					</ul>
@@ -383,7 +383,7 @@ final class Admin_Setup_Page {
 					<?php if ( $exchange ) : ?><tr><td>Exchange Online (delegada)</td><td><div class="chips"><?php foreach ( $exchange as $sc ) : ?><code class="ex"><?php echo esc_html( $sc ); ?></code><?php endforeach; ?></div></td></tr><?php endif; ?>
 					<tr><td>Login</td><td><code><?php echo esc_html( implode( ' ', Settings::OIDC_SCOPES ) ); ?></code></td></tr>
 				</table>
-				<p class="muted">Permissões delegadas: o portal enxerga só o que a conta de quem entra pode ver, sempre com a MFA e o Acesso Condicional do tenant do cliente. As permissões vêm dos <a href="<?php echo esc_url( admin_url( 'admin.php?page=j365tp-settings' ) ); ?>">módulos habilitados</a>; ao mudar os módulos, o portal mostra aos clientes o aviso <em>Atualizar o aplicativo</em> (1 clique de um administrador).</p>
+				<p class="muted">A conta usa as permissões delegadas aprovadas pelos administradores e segue as políticas de acesso do tenant. As ações opcionais podem solicitar permissões adicionais. As permissões vêm dos <a href="<?php echo esc_url( admin_url( 'admin.php?page=j365tp-settings' ) ); ?>">módulos habilitados</a>; ao mudar os módulos, o portal mostra aos clientes o aviso <em>Atualizar o aplicativo</em> (1 clique de um administrador).</p>
 			</div>
 
 			<?php $this->brand_block( '✓', 'O logo é enviado ao aplicativo de cada tenant na conexão (aparece no Entra ID e na tela de login da Microsoft). O portal usa o logo original em fundos claros e uma versão clara em fundos escuros.' ); ?>

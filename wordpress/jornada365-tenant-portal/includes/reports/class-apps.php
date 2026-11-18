@@ -67,7 +67,7 @@ final class Apps extends Report_Base {
 					]
 				);
 			} catch ( Graph_Exception $e ) {
-				$this->warn( $state, 'Aplicativos implantados pelo Intune (mobileApps) indisponíveis: ' . $e->getMessage() );
+				$this->optional_error( $state, 'Aplicativos implantados pelo Intune (mobileApps) indisponíveis', $e );
 				$state['mobile'] = [];
 				$done            = true;
 			}

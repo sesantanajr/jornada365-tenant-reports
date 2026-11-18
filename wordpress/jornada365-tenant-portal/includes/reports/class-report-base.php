@@ -79,11 +79,14 @@ abstract class Report_Base {
 		while ( $next && ! $this->out_of_time( $deadline ) ) {
 			try {
 				$data = $this->graph->get( $next, $headers );
+				if ( ! isset( $data['value'] ) || ! is_array( $data['value'] ) || ! array_is_list( $data['value'] ) ) {
+					throw new Graph_Throttled( 'O Microsoft Graph enviou uma página incompleta. Tentando novamente.', 2, 502, 'network' );
+				}
 			} catch ( Graph_Throttled $e ) {
 				$this->pause_read( $state, $e->retry_after, $e->reason );
 				break;
 			}
-			foreach ( $data['value'] ?? [] as $item ) {
+			foreach ( $data['value'] as $item ) {
 				$state[ $bucket ][] = $map ? $map( $item ) : $item;
 			}
 			$cursor = $data['@odata.nextLink'] ?? null;
@@ -126,7 +129,9 @@ abstract class Report_Base {
 			}
 			if ( isset( $response['retryAfter'] ) ) {
 				$retry  = max( $retry, (int) $response['retryAfter'] );
-				$reason = 'throttled';
+				if ( 'throttled' === ( $response['retryReason'] ?? 'throttled' ) ) {
+					$reason = 'throttled';
+				}
 				continue;
 			}
 			$completed[ $id ] = $response;
@@ -142,7 +147,7 @@ abstract class Report_Base {
 		return $completed;
 	}
 
-	private function pause_read( array &$state, int $seconds, string $reason ): void {
+	protected function pause_read( array &$state, int $seconds, string $reason ): void {
 		$state['_retry_at']     = time() + min( 86400, $seconds );
 		$state['_retry_reason'] = $reason;
 	}
@@ -150,6 +155,14 @@ abstract class Report_Base {
 	protected function warn( array &$state, string $message ): void {
 		$state['_warnings']   = $state['_warnings'] ?? [];
 		$state['_warnings'][] = $message;
+	}
+
+	/** Optional data may be unavailable, but an expired credential must reach the renewal flow. */
+	protected function optional_error( array &$state, string $label, Graph_Exception $error ): void {
+		if ( 'j365_token' === $error->graph_code() ) {
+			throw $error;
+		}
+		$this->warn( $state, $label . ': ' . $error->getMessage() );
 	}
 
 	/**
